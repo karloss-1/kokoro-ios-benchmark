@@ -73,6 +73,7 @@ const state = {
   results: [],
   currentTest: "short",
   toastTimer: null,
+  latestLoadProgress: null,
 };
 
 function currentConfig() {
@@ -263,14 +264,15 @@ function loadModel() {
   state.busy = true;
   state.worker = createWorker();
   sessionStorage.setItem("kokoro-benchmark-pending", "1");
-  setBusy(true, "Cargando modelo y voz…");
+  setBusy(true, "Cargando modelo…");
   setStatus("Cargando modelo…", "working");
   els.modelState.textContent = "Cargando modelo…";
   els.modelState.className = "quiet-state";
   els.progressRegion.hidden = false;
   setProgress(0, "Preparando la carga…");
+  state.latestLoadProgress = null;
   console.info("[Kokoro Benchmark] Requesting model", config);
-  state.worker.postMessage({ type: "load", config });
+  state.worker.postMessage({ type: "load", config, webgpuProbe: state.webgpu });
 }
 
 function generate() {
@@ -312,6 +314,7 @@ function onWorkerMessage(event) {
   const message = event.data;
   switch (message?.type) {
     case "load-progress":
+      state.latestLoadProgress = message.detail;
       renderLoadProgress(message.detail);
       break;
     case "model-loaded":
@@ -321,7 +324,7 @@ function onWorkerMessage(event) {
       sessionStorage.removeItem("kokoro-benchmark-pending");
       populateVoices(message.voices);
       setBusy(false);
-      setProgress(100, `Modelo y voz cargados en ${formatDurationMs(message.loadMs)}.`);
+      setProgress(100, `Modelo cargado en ${formatDurationMs(message.loadMs)}. Los datos de voz se cargan al generar.`);
       setStatus("Modelo listo", "success");
       updateModelState();
       window.setTimeout(() => {
@@ -355,24 +358,30 @@ function onWorkerMessage(event) {
 
 function onWorkerError(event) {
   console.error("[Kokoro Benchmark] Worker error", event.message, event.error);
+  const stage = state.loadedConfig ? "generate" : "load";
   handleOperationError({
-    stage: state.loadedConfig ? "generate" : "load",
+    stage,
+    failureCategory: stage === "generate" ? "inference" : "unknown-load",
     name: event.error?.name ?? "WorkerError",
     message: event.message || "El worker del modelo terminó inesperadamente.",
     stack: event.error?.stack ?? "",
     backend: state.backend,
     dtype: state.dtype,
+    diagnostics: mainThreadFailureDiagnostics(stage, event.error, "El worker emitió un error; su fase interna no está disponible."),
   });
 }
 
 function onWorkerMessageError(event) {
   console.error("[Kokoro Benchmark] Worker message could not be decoded", event);
+  const stage = state.loadedConfig ? "generate" : "load";
   handleOperationError({
-    stage: state.loadedConfig ? "generate" : "load",
+    stage,
+    failureCategory: stage === "generate" ? "inference" : "unknown-load",
     name: "MessageError",
-    message: "Safari no pudo recibir los datos del worker. El audio o el modelo pudo exceder la memoria disponible.",
+    message: "La página no pudo decodificar un mensaje del worker. Safari no expuso la causa.",
     backend: state.backend,
     dtype: state.dtype,
+    diagnostics: mainThreadFailureDiagnostics(stage, null, "La página no pudo decodificar el mensaje del worker; la causa no está expuesta."),
   });
 }
 
@@ -382,7 +391,7 @@ function handleOperationError(error) {
   setBusy(false);
   els.progressRegion.hidden = true;
   const message = friendlyError(error);
-  setStatus(error.stage === "load" ? "Falló la carga" : "Falló la generación", "error");
+  setStatus(error.stage === "load" ? "Falló la carga" : "Falló la inferencia", "error");
   if (error.stage === "load") {
     state.loadedConfig = null;
     state.loadMs = null;
@@ -392,11 +401,22 @@ function handleOperationError(error) {
   els.latestSection.hidden = false;
   els.resultStatus.textContent = "Error";
   els.resultStatus.className = "badge danger";
+  const diagnostics = error.diagnostics ?? mainThreadFailureDiagnostics(
+    error.stage,
+    error,
+    "No hay datos suficientes para localizar la fase exacta.",
+  );
   els.latestResult.innerHTML = `
     <div class="error-panel">
       <strong>${escapeHtml(message.title)}</strong>
       <p>${escapeHtml(message.body)}</p>
-      <details><summary>Detalle técnico</summary><pre>${escapeHtml(`${error.name ?? "Error"}: ${error.message ?? "Sin detalle"}${error.stack ? `\n${error.stack}` : ""}`)}</pre></details>
+      <details><summary>Diagnóstico técnico</summary><pre>${escapeHtml(JSON.stringify({
+        category: error.failureCategory ?? diagnostics.category ?? "unknown-load",
+        stage: error.stage ?? "unavailable",
+        requestedBackend: error.backend ?? state.backend,
+        requestedDtype: error.dtype ?? state.dtype,
+        diagnostics,
+      }, null, 2))}</pre></details>
     </div>
   `;
   showToast(message.title);
@@ -406,11 +426,11 @@ function handleOperationError(error) {
 
 function friendlyError(error) {
   const raw = `${error.name ?? ""} ${error.message ?? ""}`;
-  const text = raw.toLowerCase();
+  const category = error.failureCategory ?? (error.stage === "generate" ? "inference" : "unknown-load");
   if (/out of memory|memory allocation|allocate.*memory|oom|not enough memory|memoryerror|array buffer allocation/i.test(raw)) {
     return {
       title: "Parece que Safari se quedó sin memoria.",
-      body: "Prueba WASM con Q8, usa el texto Short, recarga la página para liberar memoria y vuelve a cargar un solo modelo. iOS puede cerrar la pestaña sin informar la causa.",
+      body: "El error menciona memoria. Safari también puede cerrar una pestaña por presión de memoria sin exponer la causa; consulta el detalle técnico antes de concluirlo.",
     };
   }
   if (error.stage === "voice") {
@@ -419,21 +439,33 @@ function friendlyError(error) {
       body: "Comprueba la conexión con Hugging Face y vuelve a intentarlo. Esta descarga se hace antes de iniciar el cronómetro de generación.",
     };
   }
-  if (/webgpu|gpu|adapter|shader|device lost/i.test(raw) || error.backend === "webgpu") {
+  if (category === "download-load") {
     return {
-      title: error.stage === "load" ? "No se pudo cargar Kokoro con WebGPU." : "Falló la generación WebGPU.",
-      body: "Safari puede exponer WebGPU y aun así no admitir una operación del modelo. Vuelve a cargar con WASM Q8 para comprobar el fallback. El mensaje técnico aparece abajo.",
+      title: "Fallo de descarga/carga",
+      body: "Los datos disponibles sitúan el fallo durante una solicitud o lectura de un recurso. Esto no demuestra una incompatibilidad de WebGPU ni de operadores. Revisa el asset, bytes, URL y estado HTTP del diagnóstico.",
     };
   }
-  if (/wasm|webassembly|onnx|runtime/i.test(text) || error.backend === "wasm") {
+  if (category === "webgpu-initialization") {
     return {
-      title: error.stage === "load" ? "No se pudo cargar Kokoro con WASM." : "Falló la generación WASM.",
-      body: "Comprueba la conexión para descargar el modelo. Si vuelve a fallar, recarga la página y prueba WASM Q8 con un texto corto. El detalle técnico aparece abajo.",
+      title: "Fallo al inicializar WebGPU",
+      body: "El error contiene una señal explícita de inicialización del proveedor WebGPU. No confirma por sí solo que un operador del modelo sea incompatible.",
+    };
+  }
+  if (category === "model-initialization") {
+    return {
+      title: "Fallo al inicializar modelo/ONNX Runtime",
+      body: "Transformers.js marcó como terminados los recursos observados antes del fallo. Kokoro.js no expone el punto exacto de inicialización de ONNX Runtime.",
+    };
+  }
+  if (error.stage === "generate" || category === "inference") {
+    return {
+      title: "Fallo durante la inferencia",
+      body: "El modelo ya había terminado de cargar, pero la generación no se completó. El detalle conserva el error original y los datos disponibles.",
     };
   }
   return {
-    title: error.stage === "load" ? "No se pudo cargar el modelo." : "La generación falló.",
-    body: "El detalle técnico aparece abajo. En iPhone/iPad, vuelve a intentarlo con WASM Q8 y el texto Short.",
+    title: "Fallo desconocido durante la carga",
+    body: "La información expuesta no permite asignar con seguridad una causa más concreta. Backend solicitado: " + (error.backend === "webgpu" ? "WebGPU" : "WASM") + ". El detalle técnico indica qué datos están disponibles y cuáles no.",
   };
 }
 
@@ -442,7 +474,7 @@ function renderLoadProgress(detail = {}) {
   if (percent > 1) percent /= 100;
   const normalizedPercent = Math.max(0, Math.min(1, percent));
   const file = String(detail.file || "recursos del modelo").split("/").pop();
-  let status = detail.status === "done" || normalizedPercent >= 1 ? "Preparando el modelo…" : `Descargando ${file}…`;
+  let status = detail.status === "done" || normalizedPercent >= 1 ? `Recurso ${file} leído; preparando el modelo…` : `Descargando ${file}…`;
   if (detail.loaded && detail.total) status += ` ${formatBytes(detail.loaded)} / ${formatBytes(detail.total)}`;
   setProgress(Math.round(normalizedPercent * 100), status);
 }
@@ -594,6 +626,27 @@ function checkInterruptedOperation() {
   setStatus("La operación anterior se interrumpió", "error");
 }
 
+function mainThreadFailureDiagnostics(stage, error, phase) {
+  return {
+    category: stage === "generate" ? "inference" : "unknown-load",
+    phase,
+    requestedBackend: state.backend,
+    modelId: MODEL_ID,
+    dtypeRequested: state.dtype,
+    webgpuAdapterProbe: state.backend === "webgpu" ? state.webgpu : "not requested",
+    webgpuDevice: "unavailable: not exposed by the library",
+    onnxRuntimeInitialization: "unavailable",
+    lastKnownAssetProgress: state.latestLoadProgress ?? "unavailable",
+    originalError: error ? {
+      name: error.name ?? "unavailable",
+      message: error.message ?? String(error),
+      stack: error.stack ?? "unavailable",
+      cause: error.cause?.message ?? "unavailable",
+    } : "unavailable",
+    unavailable: ["Safari does not reliably expose why it terminated a page or worker."],
+  };
+}
+
 function countWords(text) {
   return text.trim() ? text.trim().split(/\s+/u).length : 0;
 }
@@ -611,8 +664,8 @@ function formatDurationMs(milliseconds) {
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "—";
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function formatInteger(value) {

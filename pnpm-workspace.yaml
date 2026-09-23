@@ -1,9 +1,0 @@
-overrides:
-  '@huggingface/transformers': 3.8.1
-  '@huggingface/transformers>onnxruntime-node': '-'
-  '@huggingface/transformers>sharp': '-'
-
-allowBuilds:
-  onnxruntime-node: false
-  protobufjs: false
-  sharp: false

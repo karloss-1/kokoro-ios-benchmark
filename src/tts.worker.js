@@ -8,6 +8,7 @@ const SAMPLE_RATE = 24_000;
 const MAX_CHUNK_CHARS = 280;
 const voiceBuffers = new Map();
 const originalFetch = self.fetch.bind(self);
+let activeLoadDiagnostics = null;
 
 // Keep the ONNX Runtime WASM engine on the Pages origin instead of its CDN default.
 transformersEnv.backends.onnx.wasm.wasmPaths = {
@@ -18,7 +19,7 @@ transformersEnv.backends.onnx.wasm.wasmPaths = {
 // Kokoro.js reads voice files lazily from Cache API. Keep the network fetch out of
 // the generation timer even in browsers where Cache API is unavailable.
 self.fetch = async (input, init) => {
-  const url = typeof input === "string" ? input : input?.url;
+  const url = typeof input === "string" ? input : input?.url ?? input?.href ?? "unavailable";
   const cachedBytes = url ? voiceBuffers.get(url) : null;
   if (cachedBytes && (!init?.method || init.method.toUpperCase() === "GET")) {
     return new Response(cachedBytes.slice(0), {
@@ -26,7 +27,44 @@ self.fetch = async (input, init) => {
       headers: { "content-type": "application/octet-stream" },
     });
   }
-  return originalFetch(input, init);
+
+  const diagnostic = activeLoadDiagnostics;
+  if (!diagnostic) return originalFetch(input, init);
+
+  const fetchRecord = {
+    requestUrl: sanitizeUrl(url),
+    responseUrl: "unavailable",
+    startedAtMs: Math.round(performance.now() - diagnostic.startedAt),
+    completedAtMs: null,
+    status: "pending",
+    statusText: "unavailable",
+    contentLength: "unavailable",
+    contentType: "unavailable",
+    responseType: "unavailable",
+    redirected: "unavailable",
+    error: null,
+  };
+  diagnostic.fetches.push(fetchRecord);
+  if (diagnostic.fetches.length > 40) diagnostic.fetches.shift();
+
+  try {
+    const response = await originalFetch(input, init);
+    fetchRecord.responseUrl = sanitizeUrl(response.url);
+    fetchRecord.completedAtMs = Math.round(performance.now() - diagnostic.startedAt);
+    fetchRecord.status = response.status;
+    fetchRecord.statusText = response.statusText || "unavailable";
+    fetchRecord.contentLength = response.headers.get("content-length") ?? "unavailable";
+    fetchRecord.contentType = response.headers.get("content-type") ?? "unavailable";
+    fetchRecord.responseType = response.type || "unavailable";
+    fetchRecord.redirected = response.redirected;
+    return response;
+  } catch (error) {
+    fetchRecord.completedAtMs = Math.round(performance.now() - diagnostic.startedAt);
+    fetchRecord.status = "unavailable";
+    fetchRecord.error = serializeError(error);
+    diagnostic.lastFetchFailure = fetchRecord;
+    throw error;
+  }
 };
 
 let tts = null;
@@ -36,7 +74,7 @@ self.addEventListener("message", async (event) => {
   const message = event.data;
 
   if (message?.type === "load") {
-    await loadModel(message.config);
+    await loadModel(message.config, message.webgpuProbe);
     return;
   }
 
@@ -45,28 +83,71 @@ self.addEventListener("message", async (event) => {
   }
 });
 
-async function loadModel(config) {
+async function loadModel(config, webgpuProbe = null) {
   const startedAt = performance.now();
   tts = null;
   activeConfig = null;
   const { backend, dtype } = config;
+  const diagnostic = {
+    startedAt,
+    requestedBackend: backend,
+    modelId: MODEL_ID,
+    dtype,
+    phase: "KokoroTTS.from_pretrained",
+    webgpuAdapterProbe: backend === "webgpu"
+      ? {
+          available: typeof webgpuProbe?.available === "boolean" ? webgpuProbe.available : "unavailable",
+          reason: webgpuProbe?.reason ?? "unavailable",
+          probe: "navigator.gpu.requestAdapter() in the page; not the adapter/device used internally by ONNX Runtime",
+        }
+      : "not requested",
+    webgpuDevice: "unavailable: Kokoro.js/Transformers.js public API does not expose ONNX Runtime's acquired GPUDevice",
+    onnxRuntimeInitialization: "unavailable: no separate ONNX Runtime session lifecycle signal is exposed by this Kokoro.js API",
+    assets: new Map(),
+    fetches: [],
+    lastFetchFailure: null,
+    runtimeMessages: [],
+  };
+  activeLoadDiagnostics = diagnostic;
+  const restoreRuntimeLogs = captureRuntimeLogs(diagnostic);
 
   try {
     tts = await KokoroTTS.from_pretrained(MODEL_ID, {
       dtype,
       device: backend,
       progress_callback: (progress) => {
-        const detail = {
+        const file = String(progress?.file ?? progress?.name ?? "");
+        const name = String(progress?.name ?? MODEL_ID);
+        const key = `${name}:${file}`;
+        const previous = diagnostic.assets.get(key) ?? {};
+        const asset = {
+          name,
+          file,
           status: progress?.status ?? "progress",
-          file: progress?.file ?? progress?.name ?? "",
-          progress: Number.isFinite(progress?.progress) ? progress.progress : null,
-          loaded: Number.isFinite(progress?.loaded) ? progress.loaded : null,
-          total: Number.isFinite(progress?.total) ? progress.total : null,
+          progress: Number.isFinite(progress?.progress) ? progress.progress : previous.progress ?? null,
+          loaded: Number.isFinite(progress?.loaded) ? progress.loaded : previous.loaded ?? null,
+          total: Number.isFinite(progress?.total) ? progress.total : previous.total ?? null,
+          updatedAtMs: Math.round(performance.now() - startedAt),
+          expectedUrl: expectedModelUrl(name, file),
+        };
+        diagnostic.assets.set(key, asset);
+        diagnostic.phase = phaseForAsset(asset);
+
+        const matchedFetch = findFetchForAsset(diagnostic.fetches, asset);
+        const detail = {
+          ...asset,
+          requestUrl: matchedFetch?.requestUrl ?? "unavailable",
+          responseUrl: matchedFetch?.responseUrl ?? "unavailable",
+          httpStatus: matchedFetch?.status ?? "unavailable",
+          contentLength: matchedFetch?.contentLength ?? "unavailable",
         };
         self.postMessage({ type: "load-progress", detail });
       },
     });
     activeConfig = config;
+    diagnostic.phase = "KokoroTTS.from_pretrained completed";
+    restoreRuntimeLogs();
+    activeLoadDiagnostics = null;
 
     self.postMessage({
       type: "model-loaded",
@@ -83,18 +164,173 @@ async function loadModel(config) {
       backendConfirmation: "not exposed by Kokoro.js public API",
     });
   } catch (error) {
+    restoreRuntimeLogs();
+    diagnostic.phase = failurePhase(diagnostic);
+    const diagnostics = buildLoadDiagnostics(diagnostic, error, performance.now() - startedAt);
+    activeLoadDiagnostics = null;
     console.error("[Kokoro Benchmark] Model load failed", error);
     self.postMessage({
       type: "operation-error",
       stage: "load",
+      failureCategory: classifyLoadFailure(diagnostic, error),
       backend,
       dtype,
       name: error?.name ?? "Error",
       message: error?.message ?? String(error),
       stack: error?.stack ?? "",
+      cause: serializeError(error).cause,
+      diagnostics,
       elapsedMs: performance.now() - startedAt,
     });
   }
+}
+
+function captureRuntimeLogs(diagnostic) {
+  const originalMethods = {};
+  for (const level of ["warn", "error"]) {
+    originalMethods[level] = console[level];
+    console[level] = (...args) => {
+      if (activeLoadDiagnostics === diagnostic && diagnostic.runtimeMessages.length < 30) {
+        diagnostic.runtimeMessages.push({
+          level,
+          atMs: Math.round(performance.now() - diagnostic.startedAt),
+          message: args.map(formatDiagnosticArgument).join(" ").slice(0, 1800),
+        });
+      }
+      originalMethods[level].apply(console, args);
+    };
+  }
+
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    for (const level of Object.keys(originalMethods)) console[level] = originalMethods[level];
+  };
+}
+
+function formatDiagnosticArgument(value) {
+  if (value instanceof Error) return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ""}`;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sanitizeUrl(value) {
+  if (!value || value === "unavailable") return "unavailable";
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.href;
+  } catch {
+    return "unavailable";
+  }
+}
+
+function serializeError(error, depth = 0) {
+  if (!error) return "unavailable";
+  if (depth > 4) return "cause chain truncated";
+  return {
+    name: error.name ?? "unavailable",
+    message: error.message ?? String(error),
+    stack: error.stack ?? "unavailable",
+    cause: error.cause ? serializeError(error.cause, depth + 1) : "unavailable",
+  };
+}
+
+function expectedModelUrl(name, file) {
+  if (!file || !name || name === MODEL_ID) {
+    return file ? `https://huggingface.co/${MODEL_ID}/resolve/main/${String(file).replace(/^\/+/, "")}` : "unavailable";
+  }
+  return "unavailable";
+}
+
+function findFetchForAsset(fetches, asset) {
+  const normalizedFile = String(asset.file ?? "").replace(/^\/+/, "");
+  if (!normalizedFile) return null;
+  const matches = fetches.filter((record) => {
+    try {
+      const pathname = new URL(record.requestUrl).pathname;
+      return pathname.endsWith(`/${normalizedFile}`);
+    } catch {
+      return false;
+    }
+  });
+  return matches.at(-1) ?? null;
+}
+
+function phaseForAsset(asset) {
+  if (asset.status === "initiate") return `Transformers.js inició el recurso ${asset.file}`;
+  if (asset.status === "download") return `Leyendo el recurso ${asset.file} desde red o caché`;
+  if (asset.status === "progress") return `Descargando/leyendo el cuerpo de ${asset.file}`;
+  if (asset.status === "done") return `Transformers.js terminó de leer ${asset.file}; la inicialización puede continuar`;
+  return `Carga de ${asset.file}`;
+}
+
+function failurePhase(diagnostic) {
+  const latestAsset = [...diagnostic.assets.values()].sort((a, b) => b.updatedAtMs - a.updatedAtMs)[0];
+  if (diagnostic.lastFetchFailure) return `fetch rechazado: ${diagnostic.lastFetchFailure.requestUrl}`;
+  if (latestAsset && latestAsset.status !== "done") return phaseForAsset(latestAsset);
+  if (latestAsset?.status === "done") return "Transformers.js terminó el último recurso observado; la inicialización general seguía pendiente";
+  return diagnostic.phase;
+}
+
+function classifyLoadFailure(diagnostic, error) {
+  const raw = `${error?.name ?? ""} ${error?.message ?? ""}`;
+  if (/requestDevice|requestAdapter|no available backend found|webgpu execution provider.*(?:init|device|adapter)|(?:init|initializ).{0,30}webgpu/i.test(raw)) {
+    return "webgpu-initialization";
+  }
+  if (diagnostic.lastFetchFailure || diagnostic.fetches.some((record) => Number(record.status) >= 400)) {
+    return "download-load";
+  }
+  const assets = [...diagnostic.assets.values()];
+  const lastAsset = assets.sort((a, b) => b.updatedAtMs - a.updatedAtMs)[0];
+  if (lastAsset && lastAsset.status !== "done") return "download-load";
+  if (assets.length > 0 && assets.every((asset) => asset.status === "done")) return "model-initialization";
+  return "unknown-load";
+}
+
+function buildLoadDiagnostics(diagnostic, error, elapsedMs) {
+  const assets = [...diagnostic.assets.values()].map((asset) => {
+    const matchedFetch = findFetchForAsset(diagnostic.fetches, asset);
+    return {
+      ...asset,
+      requestUrl: matchedFetch?.requestUrl ?? "unavailable",
+      responseUrl: matchedFetch?.responseUrl ?? "unavailable",
+      httpStatus: matchedFetch?.status ?? "unavailable",
+      responseContentLength: matchedFetch?.contentLength ?? "unavailable",
+    };
+  });
+  const weightFiles = assets.filter((asset) => /\.onnx$/i.test(asset.file));
+  return {
+    category: classifyLoadFailure(diagnostic, error),
+    phase: diagnostic.phase,
+    elapsedMs: Math.round(elapsedMs),
+    requestedBackend: diagnostic.requestedBackend,
+    modelId: diagnostic.modelId,
+    dtypeRequested: diagnostic.dtype,
+    webgpuAdapterProbe: diagnostic.webgpuAdapterProbe,
+    webgpuDevice: diagnostic.webgpuDevice,
+    onnxModelAssets: weightFiles.length ? weightFiles : "unavailable: Transformers.js did not report a model file",
+    onnxModelDownloadComplete: weightFiles.length ? weightFiles.every((asset) => asset.status === "done") : "unavailable",
+    onnxRuntimeInitialization: diagnostic.onnxRuntimeInitialization,
+    failurePhase: diagnostic.phase,
+    originalError: serializeError(error),
+    lastFetchFailure: diagnostic.lastFetchFailure ?? "none observed",
+    fetches: diagnostic.fetches,
+    assets,
+    transformersOrOnnxMessages: diagnostic.runtimeMessages,
+    unavailable: [
+      "Safari/iOS process memory pressure and the reason for a page or worker termination are not exposed reliably.",
+      "The GPUDevice acquired internally by ONNX Runtime and a separate ONNX Runtime session-created event are not exposed by this Kokoro.js API.",
+    ],
+  };
 }
 
 async function generateAudio(request) {
