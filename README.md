@@ -1,82 +1,55 @@
-# Kokoro Benchmark
+# Safari Native TTS Benchmark
 
-Benchmark mínimo para comprobar la carga y la síntesis local de Kokoro 82M en Safari de iPhone/iPad. Mide WASM y WebGPU cuando el navegador expone un adaptador; no es la aplicación final.
+Benchmark pequeño para decidir si la síntesis de voz nativa que Safari expone mediante `window.speechSynthesis` sirve para una futura experiencia de lectura en iPhone/iPad. No es la aplicación final: no contiene OCR, lectores PDF/EPUB, biblioteca, exportación de audio, almacenamiento de documentos ni PWA.
+
+## Privacidad y funcionamiento
+
+La página usa `SpeechSynthesisUtterance` y `speechSynthesis` del navegador; no incluye cliente, endpoint ni API de TTS. El texto se pasa al sintetizador elegido por el usuario en el sistema. Las voces cuyo `localService` sea `false` se muestran, pero Play se bloquea porque la especificación las clasifica como voces remotas y podrían enviar el texto al proveedor. `localService: true` indica un sintetizador local, pero no prueba por sí mismo que esa voz funcione offline en una situación concreta. No se guarda ni produce WAV/MP3.
 
 ## Dependencias
 
-- `kokoro-js` **1.2.1**: API oficial de Kokoro para navegador.
-- `@huggingface/transformers` **3.8.1**: última versión estable 3.x compatible con la dependencia `^3.5.1` de Kokoro.js 1.2.1. La versión 4.x actual tiene una API mayor y no está declarada por esta versión estable de Kokoro.js.
-- `vite` **8.3.0**: servidor de desarrollo y empaquetador estático.
-- Dependencias resueltas por el lockfile: `phonemizer` **1.2.1** y `onnxruntime-web` **1.22.0-dev.20250409-89f8206ba4** (versión requerida por Transformers.js 3.8.1).
-- CI/despliegue: pnpm **12.6.0** y Node.js **24**; el lockfile fija las versiones de la aplicación y sus dependencias.
-- Modelo: `onnx-community/Kokoro-82M-v1.0-ONNX`.
+- **Vite 8.3.0** como herramienta de desarrollo y compilación estática.
+- No hay dependencias de ejecución. Se eliminaron `kokoro-js`, Transformers.js, ONNX Runtime y los assets/modelos de inferencia.
+- GitHub Actions usa Node.js 24 y pnpm 12.6.0 para construir y desplegar `dist/`.
 
-Las versiones están fijadas en `package.json` y `pnpm-lock.yaml`. `onnxruntime-node` y `sharp` se omiten porque son paquetes de Node que no hacen falta en el navegador. No se necesita backend, cuenta ni servicio de TTS.
+## Ejecutar y compilar
 
-## Ejecutar
-
-Requiere Node.js 20.19+ (se recomienda Node 24) y pnpm.
+Requiere Node.js 20.19+ (se recomienda Node 24) y pnpm:
 
 ```sh
 pnpm install
 pnpm dev
-```
-
-Para revisar el artefacto estático:
-
-```sh
 pnpm build
 pnpm preview
 ```
 
-Abre la URL HTTPS publicada directamente en Safari. El motor WASM de ONNX Runtime se sirve desde los assets de este sitio. En la primera carga se descargan pesos y datos de voz desde Hugging Face. Esos archivos se ejecutan en el dispositivo; el texto de prueba no se envía a un proveedor remoto de síntesis. El navegador puede conservar archivos del modelo en su caché para cargas posteriores.
+La compilación es un sitio estático. `vite.config.js` mantiene rutas relativas para el subdirectorio de GitHub Pages. El workflow `.github/workflows/pages.yml` publica automáticamente cada push a `main`.
 
-## Publicar en GitHub Pages
+## Uso
 
-El workflow `.github/workflows/pages.yml` construye `dist/` y lo publica con GitHub Pages al actualizar `main` o ejecutar el workflow manualmente. En la configuración del repositorio, Pages debe tener `Build and deployment → Source: GitHub Actions`. Los assets usan rutas relativas para servir desde `https://karloss-1.github.io/kokoro-ios-benchmark/`.
+1. Abre el sitio en Safari del iPhone/iPad, toca el filtro Spanish y revisa el locale reportado por cada voz. Si aparece `es-MX`, esa es la identificación regional que expuso el sistema; no se deduce el acento a partir del nombre.
+2. Escucha Spanish Short y evalúa especialmente los términos anatómicos. Prueba Medium y Long con la misma voz y velocidad.
+3. Usa Pause/Resume, los botones de navegación y los controles de velocidad. También puedes tocar una oración o el encabezado de un párrafo.
+4. Durante Long, prueba bloqueo de pantalla y cambio a otra app. Anota si continúa, se pausa, se detiene, se reanuda o Safari recarga.
+5. Compara voces cambiando la selección. Para aplicar la nueva voz durante una lectura, la página detiene la cola; vuelve a tocar Play.
 
-## Modelos y backends
+El benchmark divide el texto en párrafos y oraciones. Prefiere `Intl.Segmenter` y usa un divisor sencillo de respaldo con una lista corta de abreviaturas comunes. Cada oración se envía como utterance independiente para permitir pausa/navegación y resaltar la posición. `boundary` se registra si el motor lo entrega, pero la interfaz no depende de él.
 
-El benchmark fija el modelo `Kokoro-82M-v1.0-ONNX` para que las comparaciones sean repetibles. Las opciones visibles son las variantes que existen en el repositorio ONNX:
+## Diagnóstico y límites
 
-| Backend | Opción | Tamaño del archivo ONNX aprox. | Nota |
-| --- | --- | ---: | --- |
-| WASM | Q8 | 92.4 MB | Inicio recomendado en iPhone/iPad; también es la opción WASM usada por la demo oficial de Kokoro. |
-| WASM | Q4 + FP16 (`q4f16`) | 154 MB | Variante ofrecida por la API/modelo; el archivo es mayor que Q8. |
-| WebGPU | FP32 | 326 MB | Configuración recomendada por la demo oficial de Kokoro para WebGPU; mayor uso de memoria. |
-| WebGPU | Q8 o Q4 + FP16 | 92.4 / 154 MB | Pruebas experimentales. La existencia del artefacto no garantiza que Safari/WebGPU admita todos sus operadores. |
+El panel muestra las propiedades recibidas de `getVoices()`, posición, `rate` solicitado, eventos recientes y errores. `voiceschanged` vuelve a poblar la lista cuando el navegador notifica cambios. Safari puede devolver una lista vacía inicialmente o no exponer todas las voces instaladas; la página vuelve a consultarla durante los primeros segundos, incluye un botón para volver a detectar y ofrece filtros Spanish, English y All. `localService` y `default` se muestran literalmente como `true`, `false` o `unavailable`.
 
-La variante `q4` simple se omite: el archivo actual mide unos 305 MB, más que FP32 y Q8; `q4f16` es el artefacto Q4 más adecuado para comparar en móvil. Solo se carga una configuración a la vez. Al cambiarla, usa **Load model** para cerrar el worker anterior y cargar la seleccionada.
+La Web Speech API define `start`, `end`, `error`, `pause`, `resume` y `boundary`, pero una implementación solo tiene que proporcionar `boundary` si el sintetizador lo ofrece. La tasa es el valor solicitado al motor, no una medición de velocidad acústica. La API no define qué sucede con la cola si iOS oculta, suspende o termina Safari; este benchmark lo deja como prueba manual y registra cambios de visibilidad cuando Safari los notifica. Si iOS termina el proceso, la página no puede registrar por qué ocurrió. La función “Listen to Page” de Safari es una función integrada distinta y no demuestra que el TTS de esta página siga activo en segundo plano. No se presenta una prueba de escritorio como validación de iOS.
 
-El selector de voces se llena con las voces publicadas por Kokoro.js. El modelo v1.0 usado aquí ofrece voces en inglés; por eso los textos de prueba predeterminados también están en inglés. Puedes editar el texto.
+Una voz remota (`localService: false`) no se reproduce por privacidad. Una voz local (`true`) tampoco equivale a una prueba de modo avión: las implicaciones de conexión y latencia no están garantizadas por la propiedad.
 
-## Métricas
+## Referencias consultadas
 
-- **Tiempo de carga:** desde que comienza `KokoroTTS.from_pretrained()` hasta que el modelo y el tokenizador están listos. Incluye descarga si hace falta.
-- **Tiempo de generación:** suma wall-clock de la preparación del texto y las llamadas secuenciales a Kokoro. Empieza después de la carga y usa `performance.now()` dentro del worker.
-- **Carga de voz:** descarga o lectura de caché de los datos de voz; se prepara antes de iniciar el cronómetro de generación.
-- **Duración de audio:** cantidad real de muestras PCM devueltas por el modelo dividida entre 24,000 muestras/s. No se estima desde palabras.
-- **RTF:** tiempo de generación en segundos / duración real del audio. Menor que 1 significa que generó más rápido que el tiempo de reproducción.
-- **Velocidad equivalente:** 1 / RTF, en múltiplos de tiempo real.
-- **Tamaño:** bytes del WAV PCM de 16 bits creado a partir de las muestras devueltas.
-- **Caracteres:** puntos de código Unicode, incluidos espacios. **Palabras:** fragmentos separados por espacios.
+- [WebKit: Web Speech API en Safari 14.1](https://webkit.org/blog/11648/new-webkit-features-in-safari-14-1/) (el artículo confirma que WebKit ya soportaba síntesis de voz en Safari y documenta el motor común para reconocimiento).
+- [Web Speech API, especificación de Speech Synthesis](https://webaudio.github.io/web-speech-api/#speechsynthesis) (métodos, eventos, lista de voces y significado de `localService`).
+- [MDN: SpeechSynthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis) y [SpeechSynthesisUtterance](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisUtterance).
+- [WebKit bug 290497: voces descargadas que no aparecen en `getVoices()`](https://bugs.webkit.org/show_bug.cgi?id=290497) (reporte abierto; describe Safari 18 en macOS, no demuestra que cada iPhone tenga el mismo problema).
+- [WebKit: privacidad en Safari 26](https://webkit.org/blog/16993/news-from-wwdc25-web-technology-coming-this-fall-in-safari-26-beta/) (WebKit anunció que puede reducir la fiabilidad de la lista de voces para scripts conocidos de fingerprinting; no significa que toda página reciba una lista incompleta).
+- [Apple Support: escuchar una página en Safari para iPhone](https://support.apple.com/en-us/guide/iphone/iph449fc616c/ios) (función del lector integrado de Safari, distinta de esta prueba Web Speech).
 
-Kokoro.js no publica una API para leer el proveedor ONNX realmente elegido tras la carga. El resultado informa el **backend solicitado** y marca el **backend confirmado** como no expuesto; no presenta una solicitud WebGPU como confirmación de ejecución WebGPU.
-
-El historial y los WAV viven en memoria de la pestaña y se borran al cerrar/recargar. No hay botón de cancelación: la API pública de `generate()` no ofrece una señal de aborto para cancelar una inferencia en curso de forma segura.
-
-## Límites conocidos en iOS/iPadOS
-
-- WebGPU llegó a Safari 26 en iOS/iPadOS 26. La disponibilidad real también depende de `requestAdapter()` en el dispositivo. El benchmark comprueba el adaptador y bloquea esa opción si no lo encuentra.
-- Que exista el adaptador no garantiza que Kokoro y todos los operadores ONNX funcionen; las opciones WebGPU cuantizadas son experimentales. Si fallan, carga WASM Q8 para comprobar el fallback de forma explícita.
-- La memoria disponible para una pestaña de Safari es limitada y iOS puede terminar o recargar el proceso. Safari no siempre expone una causa detectable. Empieza con WASM Q8 y Short, mantén la página abierta y pasa a textos largos solo después.
-- `navigator.deviceMemory` no está expuesto habitualmente en Safari; la interfaz muestra que no está disponible en vez de inferirlo.
-- El sitio no incluye un service worker ni se declara PWA/offline. El primer acceso requiere internet para abrir el sitio y descargar dependencias del modelo; las cargas posteriores dependen de la caché del navegador.
-- La funcionalidad debe medirse en el iPhone/iPad real. Una compilación o una prueba en escritorio no valida compatibilidad en iOS.
-
-## Referencias actuales
-
-- [Kokoro.js](https://github.com/hexgrad/kokoro/tree/main/kokoro.js) y [demo web oficial](https://github.com/hexgrad/kokoro/tree/main/kokoro.js/demo)
-- [Modelo ONNX y variantes](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
-- [Transformers.js: tipos de datos](https://huggingface.co/docs/transformers.js/guides/dtypes) y [WebGPU](https://huggingface.co/docs/transformers.js/guides/webgpu)
-- [WebKit: novedades de Safari 26.0 y WebGPU en iOS/iPadOS](https://webkit.org/blog/17333/webkit-features-in-safari-26-0/)
+La pregunta final —calidad de la voz, continuidad real en background y estabilidad en textos largos— solo puede contestarse probándolo en el iPhone/iPad objetivo.

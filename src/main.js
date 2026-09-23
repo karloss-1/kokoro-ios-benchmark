@@ -1,685 +1,662 @@
 import "./style.css";
 
-const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
-const MODEL_OPTIONS = {
-  wasm: [
-    { dtype: "q8", title: "Q8 · 92.4 MB", description: "Cuantización de 8 bits; opción WASM recomendada por la demo oficial." },
-    { dtype: "q4f16", title: "Q4 + FP16 · 154 MB", description: "Cuatro bits con pesos FP16. El archivo es mayor que Q8; útil para comparar cuantización." },
-  ],
-  webgpu: [
-    { dtype: "fp32", title: "FP32 · 326 MB · recomendado", description: "La demo oficial de Kokoro usa FP32 con WebGPU. Es la variante más pesada." },
-    { dtype: "q8", title: "Q8 · 92.4 MB · experimental", description: "El paquete y el modelo ofrecen Q8; Kokoro no lo recomienda para WebGPU, puede fallar." },
-    { dtype: "q4f16", title: "Q4 + FP16 · 154 MB · experimental", description: "Disponible en el modelo; el uso con WebGPU depende de los operadores que admita Safari." },
-  ],
-};
-
 const TESTS = {
-  short: {
-    name: "Short",
-    text: "A reliable benchmark measures real work on the device. First, Kokoro loads its model weights; then it turns this short paragraph into speech. The audio duration comes from the generated samples, so the real-time factor reflects the actual result.",
+  esShort: {
+    name: "Español · Short",
+    text: `La articulación glenohumeral permite que el brazo se mueva en varias direcciones, pero depende de músculos y ligamentos para mantenerse estable. Durante una valoración, la fisioterapeuta observa cómo la escápula acompaña el movimiento y pregunta si aparece dolor al elevar el brazo. También palpa la apófisis coracoides y compara ambos lados, sin asumir que una diferencia pequeña indique una lesión.\n\nEl esternocleidomastoideo participa en los movimientos del cuello y puede trabajar junto con otros músculos cuando cambia la postura. En el sistema musculoesquelético, la coordinación importa tanto como la fuerza aislada. Por eso, un ejercicio se adapta al objetivo, al nivel de molestia y a la respuesta de cada persona. La contracción muscular debe producir movimiento controlado, no una lucha contra el dolor. Explicar cada paso con calma ayuda a que el paciente comprenda la tarea y participe activamente en su recuperación.`,
   },
-  medium: {
-    name: "Medium",
-    text: "This medium test checks whether local speech generation remains steady across several sentences. The benchmark divides the text into safe pieces, synthesizes each piece in sequence, and joins the audio before measuring its duration. Loading and generation are timed separately. A warm run may load faster when Safari has cached the model files, while synthesis time still depends on the selected backend, device temperature, available memory, and other work running on the phone or tablet. Listen to the result and compare the real-time factor with the other backend and quantization settings. The same text and voice make those comparisons easier to interpret.",
+  esMedium: {
+    name: "Español · Medium",
+    text: `La evaluación del movimiento comienza antes de pedir una prueba específica. En una entrevista clínica se pregunta qué actividad resulta difícil, cuándo aparecen los síntomas y qué cambios los alivian. Estas respuestas ayudan a formular hipótesis, pero no sustituyen la exploración física. También permiten elegir palabras claras para explicar el plan y comprobar que la persona entiende qué se observará.\n\nEn el hombro, la articulación glenohumeral ofrece un amplio rango de movimiento. Esa libertad depende de la forma de la articulación, la cápsula, los ligamentos y la acción coordinada de varios músculos. La escápula se desplaza sobre la caja torácica y orienta la cavidad glenoidea mientras el brazo se eleva. Por ello, mirar únicamente el brazo puede dejar fuera información importante sobre el ritmo escapulohumeral.\n\nUna valoración razonable compara tareas funcionales y movimientos aislados. La fisioterapeuta puede observar la elevación, la rotación y la capacidad de alcanzar un objeto situado a distintas alturas. La palpación de referencias anatómicas, como la apófisis coracoides, se realiza con cuidado y se interpreta junto con otros hallazgos. La sensibilidad al tacto, por sí sola, no confirma una lesión. Conviene registrar qué se hizo, qué sintió la persona y si el movimiento cambió al modificar la posición o la carga.\n\nLa región cervical también puede influir en la experiencia de dolor alrededor del hombro. El esternocleidomastoideo inclina y rota la cabeza, mientras otros músculos estabilizan el cuello y participan en la postura. Una contracción muscular que se nota durante una tarea no siempre es anormal; puede ser una respuesta esperada a la demanda. La pregunta clínica útil es si la estrategia permite completar la actividad con control y tolerancia suficientes.\n\nEl sistema musculoesquelético se adapta gradualmente a las cargas. Un programa de ejercicio puede comenzar con movimientos cómodos y avanzar cuando la respuesta es estable. El progreso no se juzga por una sola repetición ni por la ausencia total de sensaciones. Se consideran la función, la confianza, la fuerza y la recuperación entre sesiones. Una explicación sencilla, una meta compartida y una revisión periódica hacen que el plan sea más comprensible y ajustable.
+
+La interpretación de cambios pequeños también exige prudencia. Una diferencia entre dos mediciones puede reflejar una variación real, un cambio en la postura o simplemente el margen normal del instrumento. Siempre que sea posible, se repite la tarea en condiciones parecidas y se considera cómo afecta a una actividad significativa. Si los datos no coinciden con la experiencia de la persona, se conversa sobre esa discrepancia antes de modificar el tratamiento. La medición apoya el razonamiento, pero no reemplaza la decisión compartida.`,
   },
-  long: {
-    name: "Long",
-    text: "This longer test is intended to put more sustained work on the device without turning the benchmark into an unusually large download or a multi-hour task. Kokoro processes this passage as a sequence of short sections, so no single request exceeds the model's input window. The page keeps every generated audio section in memory until it can join them into one playable WAV file. That means a longer passage also uses more memory for the final audio. If Safari reloads the page, the app can report that an operation was in progress, but iOS does not reliably tell a web page why its process ended. Keep the screen awake during a run and begin with the short test after loading a new model. When that works, try this passage and note whether the output plays through, how long synthesis takes, and whether the browser remains responsive. For a fair comparison, load one backend and quantization at a time, then reuse this exact passage and voice. The generation timer includes text preparation and all sequential synthesis calls, but excludes model download and loading. The audio duration is measured from the number of PCM samples returned by Kokoro at its documented sample rate. No duration is estimated from the word count. A result below one real-time factor generated faster than playback; a result above one took longer than the resulting audio would take to play.",
+  esLong: {
+    name: "Español · Long",
+    text: `La lectura de una evaluación musculoesquelética requiere conectar la historia de la persona con lo que se observa durante el movimiento. Ningún dato aislado suele explicar por completo una dificultad. La edad, la ocupación, las actividades habituales, el descanso y las expectativas pueden cambiar la manera en que se manifiestan los síntomas. Por eso, la conversación inicial no es un trámite: orienta las decisiones que se tomarán después y ayuda a escoger pruebas que respondan preguntas concretas.\\n\\nUna entrevista útil invita a describir la actividad que se ha vuelto difícil. Puede tratarse de alcanzar un estante, vestirse, cargar una mochila o permanecer sentado durante una clase. El profesional pregunta cuándo comenzó el problema, cómo ha cambiado y qué intentos de solución se hicieron. También explora si hay factores que requieren atención médica adicional. Las respuestas se resumen en un lenguaje comprensible y se confirman con la persona para reducir malentendidos. El propósito no es encontrar una etiqueta lo más rápido posible, sino entender la situación y acordar el siguiente paso.\\n\\nEl hombro es un complejo formado por varias articulaciones y superficies de deslizamiento. La articulación glenohumeral une la cabeza del húmero con la cavidad glenoidea de la escápula. Su configuración permite elevar y rotar el brazo en un arco amplio, aunque ofrece menos estabilidad ósea que otras articulaciones. La cápsula, los ligamentos, el labrum y la actividad de los músculos contribuyen a mantener una relación funcional entre las superficies durante el movimiento.\\n\\nLa escápula tampoco permanece inmóvil. Se orienta y se desplaza sobre la pared torácica conforme el brazo sube, baja o carga un objeto. La clavícula transmite parte de ese movimiento hacia el tronco. Una observación clínica puede considerar el ritmo entre el húmero y la escápula, pero no existe una única apariencia que sea perfecta para todas las personas. Importan el objetivo de la tarea, la comodidad, la fuerza disponible y la posibilidad de repetirla de manera segura.\\n\\nLas referencias anatómicas ayudan a describir dónde se encuentra una estructura. La apófisis coracoides, por ejemplo, es una proyección de la escápula situada en la parte anterior del hombro. Puede localizarse mediante palpación, con respeto por la sensibilidad de la persona. La palpación sirve para orientar la exploración, no para confirmar por sí sola la causa del dolor. Es necesario relacionar la respuesta al tacto con la historia, el rango de movimiento, la fuerza y las pruebas que sean pertinentes para la pregunta clínica.\\n\\nAl observar una elevación del brazo, se puede empezar con una tarea sencilla y luego cambiar una variable a la vez. El brazo puede moverse en distintos planos, con el pulgar orientado hacia arriba o con una carga ligera. La velocidad también modifica la exigencia. Si se cambia simultáneamente la postura, el peso y la amplitud, será más difícil saber qué factor produjo una diferencia. Registrar con precisión la posición y las instrucciones facilita repetir la observación y comparar resultados en otro momento.\\n\\nEl cuello y la cintura escapular comparten conexiones musculares. El esternocleidomastoideo inclina el cuello hacia su lado y contribuye a girar la cabeza hacia el lado opuesto. Otros músculos unen las vértebras con la escápula y la clavícula. Estas relaciones permiten que la cabeza, el cuello y el brazo se coordinen durante tareas cotidianas. Notar actividad muscular en una región no demuestra que esa actividad sea la causa de un síntoma; puede ser parte normal de la estrategia elegida para realizar el movimiento.\\n\\nUna contracción muscular es la producción de tensión por parte de las fibras, con o sin un cambio visible de longitud. Durante una acción, distintos grupos musculares pueden generar movimiento, frenarlo o estabilizar una articulación. La cantidad de esfuerzo cambia según la carga, la velocidad, la fatiga y la experiencia. Una persona puede completar el mismo gesto con estrategias diferentes y aun así cumplir su objetivo. La evaluación busca conocer la capacidad y la tolerancia, no imponer una forma idéntica de moverse a todos.\\n\\nEl sistema musculoesquelético responde a las cargas que recibe. Una carga insuficiente puede no producir el estímulo buscado, mientras que un aumento brusco puede exceder la tolerancia actual. La adaptación suele beneficiarse de una progresión gradual, con tiempo para recuperarse y oportunidades de practicar la tarea. La dosis del ejercicio se ajusta a partir de la respuesta durante la sesión y en las horas siguientes. Las molestias leves pueden ser aceptables en algunos planes, pero se acuerda de antemano qué señales indican que conviene reducir o detener una actividad.\\n\\nLa fisioterapia utiliza ejercicio, educación y otras estrategias de acuerdo con las necesidades y preferencias de la persona. Un ejercicio no es valioso solo porque parezca complejo. Debe tener una razón clara, una dificultad apropiada y una relación con una meta funcional. La instrucción puede describir una acción sencilla, como empujar suavemente una pared, alcanzar un objeto liviano o practicar una rotación sin carga. Después se revisa si la tarea fue comprensible, si produjo la respuesta esperada y qué ajuste facilitaría la siguiente repetición.\\n\\nLa fuerza se puede explorar con pruebas manuales o con instrumentos, según la pregunta y el equipo disponible. Una medición adquiere más sentido cuando se especifican la posición, la palanca, la dirección de la resistencia y la forma de registrar el resultado. También se observa la capacidad de sostener o repetir una tarea. La diferencia entre dos lados puede ser informativa, aunque no debe interpretarse automáticamente como enfermedad. Las variaciones naturales, la dominancia y la exposición a actividades distintas también influyen en el rendimiento.\\n\\nLa movilidad articular se describe de varias maneras. El movimiento activo muestra lo que la persona puede realizar por sí misma; el movimiento pasivo explora el desplazamiento cuando una fuerza externa acompaña la extremidad. Ambas observaciones pueden aportar datos distintos. Se registran el plano, la amplitud aproximada, la calidad del movimiento y los síntomas que aparecen. El instrumento de medición y la postura deben mantenerse lo más constantes posible si se desea comparar resultados entre sesiones. Una cifra aislada no resume toda la experiencia funcional.\\n\\nEl lenguaje del profesional también influye en la experiencia. Expresiones que sugieren daño inevitable pueden generar preocupación innecesaria si no están sustentadas por la evaluación. Una comunicación cuidadosa distingue entre dolor y lesión, reconoce que el dolor es real y explica que varios factores pueden participar en él. No se trata de minimizar lo que siente alguien, sino de ofrecer una descripción que deje espacio para aprender y mejorar. Las instrucciones concretas, las preguntas abiertas y la escucha activa fortalecen la colaboración.\\n\\nLa práctica basada en evidencia integra investigación, experiencia clínica y preferencias individuales. Un artículo científico puede orientar una decisión, pero sus resultados deben interpretarse en el contexto de quién participó, qué intervención se estudió y cómo se midió el cambio. La evidencia no elimina el juicio clínico: ayuda a formular mejores preguntas y a comunicar la incertidumbre. Del mismo modo, una práctica tradicional no se mantiene solo por costumbre; es razonable preguntarse qué objetivo cumple y cómo se sabrá si resulta útil.\\n\\nAl finalizar una evaluación, se puede resumir la información con tres ideas: qué actividades son importantes para la persona, qué capacidades se observaron y cuál será el paso acordado. Esa síntesis evita que los detalles anatómicos desplacen la meta principal. Si se propone una contracción muscular isométrica, se explica cuánto esfuerzo usar, cuánto tiempo sostenerla y cómo modificarla si resulta incómoda. Si se trabaja la movilidad, se indica hasta dónde llegar y qué señal usar para detenerse. La claridad hace que el plan sea más fácil de recordar.\\n\\nEl seguimiento permite comprobar si las decisiones iniciales fueron apropiadas. Se repite una tarea relevante, se pregunta por los cambios cotidianos y se compara la respuesta con la línea de base. Si hay mejoras, el programa puede avanzar con prudencia; si no las hay, se revisa la hipótesis y se consideran otras opciones. El resultado no depende exclusivamente de una estructura, un músculo o una articulación. La función emerge de la interacción entre la persona, la tarea y el entorno.\\n\\nUn enfoque comprensible reconoce tanto la anatomía como la vida diaria. La apófisis coracoides y el esternocleidomastoideo tienen nombres específicos, pero su estudio cobra sentido cuando ayuda a responder una pregunta práctica. La articulación glenohumeral y el resto del sistema musculoesquelético permiten acciones que valoramos, desde levantar un vaso hasta abrazar a alguien. La fisioterapia busca apoyar esas acciones mediante decisiones razonadas, metas realistas y una relación de colaboración. Esa combinación proporciona una base sólida para evaluar el cambio sin prometer más de lo que los datos permiten.`,
+  },
+  enShort: {
+    name: "English · Short",
+    text: `The shoulder can move through a wide range, so stability depends on several tissues working together. During an assessment, a therapist may observe how the shoulder blade moves as the arm rises. One movement alone rarely explains pain or function. The person’s goals, comfort, strength, and daily activities also matter. A useful exercise should have a clear purpose and a manageable level of effort. The plan can be adjusted as the response changes. Clear instructions help the person understand what to do and why it may help. Progress is reviewed over time rather than judged from one repetition.`,
   },
 };
 
 const $ = (selector) => document.querySelector(selector);
 const els = {
-  status: $("#app-status"),
-  statusText: $("#status-text"),
-  webgpuBadge: $("#webgpu-badge"),
-  userAgent: $("#user-agent"),
-  webgpuStatus: $("#webgpu-status"),
-  selectedBackend: $("#selected-backend"),
-  selectedModel: $("#selected-model"),
-  hardwareConcurrency: $("#hardware-concurrency"),
-  deviceMemory: $("#device-memory"),
-  backendButtons: [...document.querySelectorAll("[data-backend]")],
-  backendNote: $("#backend-note"),
-  quantization: $("#quantization"),
-  quantizationNote: $("#quantization-note"),
-  voice: $("#voice"),
-  testButtons: [...document.querySelectorAll("[data-test]")],
-  text: $("#test-text"),
-  textCount: $("#text-count"),
-  modelState: $("#model-state"),
-  loadButton: $("#load-button"),
-  generateButton: $("#generate-button"),
-  progressRegion: $("#progress-region"),
-  progressBar: $("#progress-bar"),
-  progressText: $("#progress-text"),
-  latestSection: $("#latest-section"),
-  latestResult: $("#latest-result"),
-  resultStatus: $("#result-status"),
-  historySection: $("#history-section"),
-  historyList: $("#history-list"),
-  clearHistory: $("#clear-history"),
-  toast: $("#toast"),
+  status: $("#app-status"), statusText: $("#status-text"),
+  userAgent: $("#user-agent"), apiStatus: $("#api-status"), visibility: $("#visibility"),
+  filterButtons: [...document.querySelectorAll("[data-filter]")], voiceSelect: $("#voice-select"), voiceList: $("#voice-list"),
+  refreshVoices: $("#refresh-voices"),
+  voiceSummary: $("#voice-summary"), voiceCount: $("#voice-count"), voiceNote: $("#voice-note"),
+  tests: [...document.querySelectorAll("[data-test]")], text: $("#source-text"), textCount: $("#text-count"),
+  paragraphs: $("#paragraphs"), paragraphCount: $("#paragraph-count"), sentenceCount: $("#sentence-count"),
+  rate: $("#rate"), rateValue: $("#rate-value"),
+  play: $("#play"), pause: $("#pause"), resume: $("#resume"), stop: $("#stop"),
+  previousSentence: $("#previous-sentence"), repeatSentence: $("#repeat-sentence"), nextSentence: $("#next-sentence"),
+  previousParagraph: $("#previous-paragraph"), nextParagraph: $("#next-paragraph"),
+  diagVoice: $("#diag-voice"), diagLocale: $("#diag-locale"), diagLocal: $("#diag-local"), diagRate: $("#diag-rate"),
+  diagParagraphs: $("#diag-paragraphs"), diagSentences: $("#diag-sentences"), diagCursor: $("#diag-cursor"),
+  diagEvent: $("#diag-event"), diagError: $("#diag-error"), eventLog: $("#event-log"),
 };
 
 const state = {
-  webgpu: { checked: false, available: false, reason: "" },
-  backend: "wasm",
-  dtype: "q8",
-  worker: null,
-  loadedConfig: null,
-  loadMs: null,
-  busy: false,
-  results: [],
-  currentTest: "short",
-  toastTimer: null,
-  latestLoadProgress: null,
+  synth: window.speechSynthesis ?? null,
+  voices: [],
+  selectedVoiceKey: "",
+  paragraphs: [],
+  cursor: 0,
+  rate: 1,
+  token: 0,
+  activeUtterance: null,
+  playing: false,
+  paused: false,
+  events: [],
+  lastEvent: "—",
+  lastError: "Ninguno",
+  boundaryCount: 0,
+  currentTest: "esShort",
 };
-
-function currentConfig() {
-  return { backend: state.backend, dtype: state.dtype, modelId: MODEL_ID };
-}
-
-function sameConfig(a, b) {
-  return Boolean(a && b && a.backend === b.backend && a.dtype === b.dtype && a.modelId === b.modelId);
-}
 
 function boot() {
   els.userAgent.textContent = navigator.userAgent || "No expuesto";
-  els.hardwareConcurrency.textContent = Number.isFinite(navigator.hardwareConcurrency)
-    ? `${navigator.hardwareConcurrency} hilos lógicos`
-    : "No expuesto por el navegador";
-  els.deviceMemory.textContent = Number.isFinite(navigator.deviceMemory)
-    ? `${navigator.deviceMemory} GB (aprox.)`
-    : "No expuesto por el navegador";
-  setTest("short");
-  renderQuantizationOptions();
-  updateDeviceInfo();
-  renderWebGPUState();
-  checkWebGPU();
-  checkInterruptedOperation();
   bindEvents();
-}
-
-async function checkWebGPU() {
-  const gpu = navigator.gpu;
-  if (!gpu || typeof gpu.requestAdapter !== "function") {
-    state.webgpu = { checked: true, available: false, reason: "navigator.gpu no está disponible" };
-    renderWebGPUState();
+  bindPageDiagnostics();
+  setTest(state.currentTest);
+  if (!state.synth || typeof window.SpeechSynthesisUtterance !== "function") {
+    els.apiStatus.textContent = "No disponible en este navegador";
+    setStatus("Este navegador no expone Web Speech API", "error");
+    disableControls();
     return;
   }
 
-  try {
-    const adapter = await gpu.requestAdapter();
-    state.webgpu = adapter
-      ? { checked: true, available: true, reason: "Adaptador WebGPU disponible" }
-      : { checked: true, available: false, reason: "Safari no devolvió un adaptador WebGPU" };
-  } catch (error) {
-    state.webgpu = { checked: true, available: false, reason: error?.message || "Falló requestAdapter()" };
-    console.warn("[Kokoro Benchmark] WebGPU adapter check failed", error);
-  }
-  renderWebGPUState();
+  els.apiStatus.textContent = "speechSynthesis disponible";
+  els.synth = state.synth;
+  state.synth.addEventListener?.("voiceschanged", refreshVoices);
+  if (!state.synth.addEventListener) state.synth.onvoiceschanged = refreshVoices;
+  refreshVoices();
+  [150, 600, 1500].forEach((delay) => window.setTimeout(() => {
+    if (state.voices.length === 0) refreshVoices();
+  }, delay));
+  updateControls();
 }
 
-function renderWebGPUState() {
-  const gpuButton = els.backendButtons.find((button) => button.dataset.backend === "webgpu");
-  gpuButton.disabled = !state.webgpu.checked || !state.webgpu.available || state.busy;
-  if (!state.webgpu.checked) {
-    els.webgpuStatus.textContent = "Comprobando adaptador…";
-    els.webgpuBadge.textContent = "WebGPU: comprobando";
-    els.webgpuBadge.className = "badge pending";
-    return;
-  }
-  if (state.webgpu.available) {
-    els.webgpuStatus.textContent = "Sí · adaptador disponible";
-    els.webgpuBadge.textContent = "WebGPU: disponible";
-    els.webgpuBadge.className = "badge success";
+function disableControls() {
+  [els.voiceSelect, els.refreshVoices, els.rate, els.play, els.pause, els.resume, els.stop,
+    els.previousSentence, els.repeatSentence, els.nextSentence, els.previousParagraph, els.nextParagraph]
+    .forEach((element) => { element.disabled = true; });
+  els.filterButtons.forEach((element) => { element.disabled = true; });
+}
+
+function refreshVoices() {
+  if (!state.synth) return;
+  const previous = selectedVoice();
+  state.voices = state.synth.getVoices();
+  renderVoiceControls(previous);
+  updateDiagnostics();
+  if (state.voices.length === 0) {
+    els.voiceNote.textContent = "Safari aún no expone voces. Espera un momento o vuelve a detectar.";
+    els.voiceCount.textContent = "0 voces";
+    setStatus("Esperando la lista de voces del sistema", "idle");
   } else {
-    const reason = state.webgpu.reason || "Sin adaptador WebGPU";
-    els.webgpuStatus.textContent = `No · ${reason}`;
-    els.webgpuBadge.textContent = "WebGPU: no disponible";
-    els.webgpuBadge.className = "badge warning";
+    els.voiceNote.textContent = "La lista refleja únicamente lo que esta página recibió de Safari.";
+    els.voiceCount.textContent = `${state.voices.length} ${state.voices.length === 1 ? "voz detectada" : "voces detectadas"}`;
+    setStatus(`${state.voices.length} voces visibles en este navegador`, "success");
   }
 }
+
+function voiceKey(voice, index) {
+  return `${voice.voiceURI || ""}¦${voice.name || ""}¦${voice.lang || ""}¦${index}`;
+}
+
+function selectedVoice() {
+  return state.voices.find((voice, index) => voiceKey(voice, index) === state.selectedVoiceKey) ?? null;
+}
+
+function renderVoiceControls(previous) {
+  const previousKey = previous ? `${previous.voiceURI || ""}¦${previous.name || ""}¦${previous.lang || ""}` : "";
+  const filter = els.filterButtons.find((button) => button.classList.contains("is-selected"))?.dataset.filter || "spanish";
+  const entries = state.voices.map((voice, index) => ({ voice, index, key: voiceKey(voice, index) }));
+  const filtered = entries.filter(({ voice }) => filter === "all"
+    || (filter === "spanish" && isSpanish(voice.lang))
+    || (filter === "english" && isEnglish(voice.lang)));
+  filtered.sort((a, b) => Number(isSpanish(b.voice.lang)) - Number(isSpanish(a.voice.lang))
+    || Number(Boolean(b.voice.default)) - Number(Boolean(a.voice.default))
+    || String(a.voice.lang || "").localeCompare(String(b.voice.lang || ""))
+    || String(a.voice.name || "").localeCompare(String(b.voice.name || "")));
+
+  els.voiceSelect.replaceChildren();
+  if (filtered.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = state.voices.length ? "No hay voces en este filtro" : "Esperando voces…";
+    els.voiceSelect.append(option);
+    state.selectedVoiceKey = "";
+  } else {
+    filtered.forEach(({ voice, key }) => {
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = `${isSpanish(voice.lang) ? "Spanish · " : ""}${voice.name || "Nombre no expuesto"} — ${voice.lang || "locale no expuesto"}${voice.default ? " · predeterminada" : ""}${voice.localService === true ? " · localService true" : voice.localService === false ? " · localService false" : " · localService unavailable"}`;
+      els.voiceSelect.append(option);
+    });
+    const match = filtered.find(({ voice }) => previousKey && `${voice.voiceURI || ""}¦${voice.name || ""}¦${voice.lang || ""}` === previousKey);
+    const preferred = match ?? filtered.find(({ voice }) => isSpanish(voice.lang) && voice.localService === true)
+      ?? filtered.find(({ voice }) => voice.default && voice.localService === true)
+      ?? filtered[0];
+    state.selectedVoiceKey = preferred.key;
+    els.voiceSelect.value = state.selectedVoiceKey;
+  }
+
+  els.voiceList.replaceChildren();
+  if (filtered.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = state.voices.length ? "No hay voces para este idioma." : "La lista está vacía por ahora.";
+    els.voiceList.append(empty);
+  } else {
+    filtered.forEach(({ voice }) => {
+      const row = document.createElement("li");
+      const title = document.createElement("strong");
+      title.textContent = voice.name || "Nombre no expuesto";
+      const details = document.createElement("span");
+      details.textContent = `lang: ${voice.lang || "unavailable"} · localService: ${formatBoolean(voice.localService)} · default: ${formatBoolean(voice.default)}`;
+      row.append(title, details);
+      els.voiceList.append(row);
+    });
+  }
+  els.voiceSummary.textContent = `Ver las ${filtered.length} voces de este filtro`;
+  updateVoiceNote();
+  updateControls();
+}
+
+function isSpanish(lang) { return String(lang || "").toLowerCase().startsWith("es"); }
+function isEnglish(lang) { return String(lang || "").toLowerCase().startsWith("en"); }
+function formatBoolean(value) { return typeof value === "boolean" ? String(value) : "unavailable"; }
 
 function bindEvents() {
-  els.backendButtons.forEach((button) => {
-    button.addEventListener("click", () => setBackend(button.dataset.backend));
+  els.filterButtons.forEach((button) => button.addEventListener("click", () => {
+    els.filterButtons.forEach((item) => {
+      const selected = item === button;
+      item.classList.toggle("is-selected", selected);
+      item.setAttribute("aria-pressed", String(selected));
+    });
+    renderVoiceControls(selectedVoice());
+  }));
+  els.voiceSelect.addEventListener("change", () => {
+    const wasActive = state.playing || state.paused;
+    invalidatePlayback();
+    if (wasActive) setStatus("Voz cambiada; toca Play para continuar con la nueva voz", "idle");
+    updateVoiceNote();
+    updateControls();
+    updateDiagnostics();
   });
-  els.quantization.addEventListener("change", () => {
-    state.dtype = els.quantization.value;
-    const choice = MODEL_OPTIONS[state.backend].find((option) => option.dtype === state.dtype);
-    if (choice) els.quantizationNote.textContent = choice.description;
-    updateDeviceInfo();
-    updateModelState();
-  });
-  els.voice.addEventListener("change", updateGenerateButton);
-  els.testButtons.forEach((button) => button.addEventListener("click", () => setTest(button.dataset.test)));
+  els.refreshVoices.addEventListener("click", refreshVoices);
+  els.tests.forEach((button) => button.addEventListener("click", () => setTest(button.dataset.test)));
   els.text.addEventListener("input", () => {
     state.currentTest = null;
-    setSelectedTest(null);
-    updateTextCount();
-    updateGenerateButton();
+    els.tests.forEach((button) => button.classList.remove("is-selected"));
+    renderText();
   });
-  els.loadButton.addEventListener("click", loadModel);
-  els.generateButton.addEventListener("click", generate);
-  els.clearHistory.addEventListener("click", clearHistory);
-  window.addEventListener("pagehide", () => {
-    if (state.worker && state.busy) sessionStorage.setItem("kokoro-benchmark-pending", "1");
+  els.rate.addEventListener("change", () => {
+    state.rate = Number(els.rate.value);
+    els.rateValue.textContent = `${state.rate.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}×`;
+    const restart = state.playing && !state.paused;
+    const index = state.cursor;
+    if (restart) startAt(index, "Velocidad cambiada; se repite la oración actual");
+    updateDiagnostics();
+  });
+  els.play.addEventListener("click", () => {
+    if (state.paragraphs.length === 0) return;
+    const voice = selectedVoice();
+    if (!voice) return setStatus("No hay una voz disponible en el filtro actual", "error");
+    if (voice.localService === false) {
+      setStatus("Esta voz indica localService=false; no se usará porque podría enviar texto a un servicio remoto", "error");
+      return;
+    }
+    if (state.paragraphs.flatMap((paragraph) => paragraph.sentences).length === 0) {
+      setStatus("Añade texto antes de reproducir", "error");
+      return;
+    }
+    const total = totalSentences();
+    const index = state.cursor >= total ? 0 : state.cursor;
+    startAt(index, "Lectura iniciada");
+  });
+  els.pause.addEventListener("click", () => {
+    if (!state.synth) return;
+    state.synth.pause();
+    state.paused = true;
+    recordEvent("pause() solicitado");
+    setStatus("Pausa solicitada al navegador", "idle");
+    updateControls();
+  });
+  els.resume.addEventListener("click", () => {
+    if (!state.synth) return;
+    state.synth.resume();
+    state.paused = false;
+    state.playing = true;
+    recordEvent("resume() solicitado");
+    setStatus("Reanudación solicitada al navegador", "working");
+    updateControls();
+  });
+  els.stop.addEventListener("click", () => stopPlayback("Lectura detenida y cola cancelada"));
+  els.previousSentence.addEventListener("click", () => moveSentence(-1));
+  els.repeatSentence.addEventListener("click", () => startAt(state.cursor, "Repetir oración"));
+  els.nextSentence.addEventListener("click", () => moveSentence(1));
+  els.previousParagraph.addEventListener("click", () => moveParagraph(-1));
+  els.nextParagraph.addEventListener("click", () => moveParagraph(1));
+  els.paragraphs.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-start-index]");
+    if (!button) return;
+    const index = Number(button.dataset.startIndex);
+    if (!state.synth) {
+      state.cursor = index;
+      highlightCursor(true);
+      setStatus("Este navegador no expone Web Speech API", "error");
+      return;
+    }
+    startAt(index, button.dataset.sentenceIndex === undefined ? "Inicio de párrafo" : "Oración seleccionada");
   });
 }
 
-function setBackend(backend) {
-  if (state.busy || (backend === "webgpu" && !state.webgpu.available)) return;
-  state.backend = backend;
-  const options = MODEL_OPTIONS[backend];
-  state.dtype = options[0].dtype;
-  els.backendButtons.forEach((button) => {
-    const selected = button.dataset.backend === backend;
-    button.classList.toggle("is-selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
+function bindPageDiagnostics() {
+  const visibilityText = () => document.visibilityState === "visible" ? "Visible" : "En segundo plano / pantalla apagada";
+  els.visibility.textContent = visibilityText();
+  document.addEventListener("visibilitychange", () => {
+    els.visibility.textContent = visibilityText();
+    recordEvent(`visibilitychange: ${document.visibilityState}`);
+    if (document.visibilityState === "hidden" && (state.playing || state.paused)) {
+      setStatus("Página oculta durante la lectura; comprueba si Safari mantiene el audio", "working");
+    } else if (document.visibilityState === "visible") {
+      updateStatusFromEngine();
+    }
   });
-  els.backendNote.textContent = backend === "webgpu"
-    ? "Kokoro recomienda FP32. Las cuantizaciones Q8 y Q4F16 se muestran como pruebas experimentales en WebGPU."
-    : "WASM corre en el CPU. Q8 es la opción recomendada para empezar en iPhone/iPad.";
-  renderQuantizationOptions();
-  updateDeviceInfo();
-  updateModelState();
+  window.addEventListener("pagehide", () => recordEvent("pagehide"));
+  window.addEventListener("pageshow", (event) => {
+    recordEvent(event.persisted ? "pageshow (restaurado desde bfcache)" : "pageshow");
+    if (event.persisted) updateStatusFromEngine();
+  });
 }
 
-function renderQuantizationOptions() {
-  const options = MODEL_OPTIONS[state.backend];
-  els.quantization.innerHTML = options
-    .map((option) => `<option value="${option.dtype}">${option.title}</option>`)
-    .join("");
-  els.quantization.value = state.dtype;
-  const selected = options.find((option) => option.dtype === state.dtype) ?? options[0];
-  els.quantizationNote.textContent = selected.description;
-}
-
-function updateDeviceInfo() {
-  const backendName = state.backend === "webgpu" ? "WebGPU" : "WASM";
-  const option = MODEL_OPTIONS[state.backend].find((item) => item.dtype === state.dtype);
-  els.selectedBackend.textContent = backendName;
-  els.selectedModel.textContent = `Kokoro 82M · ${option?.title ?? state.dtype}`;
+function updateVoiceNote() {
+  const voice = selectedVoice();
+  if (!voice) {
+    els.voiceNote.textContent = "No hay voz seleccionada.";
+    return;
+  }
+  if (voice.localService === false) {
+    els.voiceNote.textContent = "Safari informa localService=false. Por privacidad, Play queda bloqueado: el texto podría enviarse al servicio de voz del sistema.";
+  } else if (voice.localService === true) {
+    els.voiceNote.textContent = "Safari informa localService=true (sintetizador local). Esto no demuestra por sí solo que funcione sin conexión.";
+  } else {
+    els.voiceNote.textContent = "Safari no expuso localService para esta voz; Play queda bloqueado hasta conocer si es local.";
+  }
 }
 
 function setTest(name) {
   const test = TESTS[name];
-  if (!test || state.busy) return;
+  if (!test) return;
+  if (state.playing || state.paused) stopPlayback("Texto de prueba cambiado; lectura detenida");
   state.currentTest = name;
   els.text.value = test.text;
-  setSelectedTest(name);
-  updateTextCount();
-  updateGenerateButton();
-}
-
-function setSelectedTest(name) {
-  els.testButtons.forEach((button) => {
+  els.tests.forEach((button) => {
     const selected = button.dataset.test === name;
     button.classList.toggle("is-selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   });
+  state.cursor = 0;
+  renderText();
 }
 
-function updateTextCount() {
-  const value = els.text.value;
-  const characters = [...value].length;
-  const words = countWords(value);
-  els.textCount.textContent = `${formatInteger(characters)} caracteres · ${formatInteger(words)} palabras`;
+function renderText() {
+  state.paragraphs = segmentText(els.text.value);
+  const total = totalSentences();
+  els.textCount.textContent = `${els.text.value.length.toLocaleString()} caracteres · ${countWords(els.text.value).toLocaleString()} palabras`;
+  els.paragraphCount.textContent = `${state.paragraphs.length} ${state.paragraphs.length === 1 ? "párrafo" : "párrafos"}`;
+  els.sentenceCount.textContent = `${total} ${total === 1 ? "oración" : "oraciones"}`;
+  els.paragraphs.replaceChildren();
+  let globalIndex = 0;
+  state.paragraphs.forEach((paragraph, paragraphIndex) => {
+    const article = document.createElement("article");
+    article.className = "text-paragraph";
+    article.dataset.paragraph = String(paragraphIndex);
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "paragraph-start";
+    header.dataset.startIndex = String(globalIndex);
+    header.textContent = `Párrafo ${paragraphIndex + 1} · comenzar aquí`;
+    article.append(header);
+    const content = document.createElement("p");
+    paragraph.sentences.forEach((sentence, sentenceIndex) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "sentence";
+      button.dataset.startIndex = String(globalIndex);
+      button.dataset.paragraph = String(paragraphIndex);
+      button.dataset.sentence = String(sentenceIndex);
+      button.textContent = sentence.text;
+      content.append(button);
+      globalIndex += 1;
+    });
+    article.append(content);
+    els.paragraphs.append(article);
+  });
+  if (state.cursor >= total) state.cursor = Math.max(0, total - 1);
+  highlightCursor();
+  updateDiagnostics();
+  updateControls();
 }
 
-function updateModelState() {
-  const matches = sameConfig(state.loadedConfig, currentConfig());
-  if (matches) {
-    els.modelState.textContent = `Cargado · ${formatDurationMs(state.loadMs)}`;
-    els.modelState.className = "quiet-state loaded";
-  } else if (state.loadedConfig) {
-    els.modelState.textContent = "Configuración cambió · vuelve a cargar";
-    els.modelState.className = "quiet-state stale";
-  } else {
-    els.modelState.textContent = "Modelo sin cargar";
-    els.modelState.className = "quiet-state";
+function segmentText(value) {
+  const rawParagraphs = String(value || "").replace(/\r\n?/g, "\n").split(/\n\s*\n+/).map((text) => text.trim()).filter(Boolean);
+  return rawParagraphs.map((text) => ({ text, sentences: splitSentences(text) }));
+}
+
+function splitSentences(text) {
+  if (typeof Intl.Segmenter === "function") {
+    const segmenter = new Intl.Segmenter("es", { granularity: "sentence" });
+    const sentences = [];
+    let leading = "";
+    for (const part of segmenter.segment(text)) {
+      const piece = part.segment;
+      if (!piece.trim()) {
+        if (sentences.length) sentences[sentences.length - 1].text += piece;
+        else leading += piece;
+      } else {
+        sentences.push({ text: leading + piece });
+        leading = "";
+      }
+    }
+    if (leading && sentences.length) sentences[sentences.length - 1].text += leading;
+    return sentences;
   }
-  updateGenerateButton();
+
+  const abbreviations = ["p. ej.", "etc.", "Dr.", "Dra.", "Sr.", "Sra.", "Mtro.", "Mtra.", "núm.", "fig.", "vol.", "pág.", "pp.", "vs.", "aprox.", "art.", "cap.", "EE. UU."];
+  let protectedText = text;
+  abbreviations.forEach((abbreviation) => {
+    protectedText = protectedText.replace(new RegExp(escapeRegExp(abbreviation), "gi"), (match) => match.replace(/\./g, "\uE000"));
+  });
+  const pieces = protectedText.match(/[^.!?…]+(?:[.!?…]+[”’"'»)}\]]*)?\s*/g) || [protectedText];
+  return pieces.map((piece) => piece.replace(/\uE000/g, ".")).filter((piece) => piece.trim()).map((piece) => ({ text: piece }));
 }
 
-function updateGenerateButton() {
-  const ready = sameConfig(state.loadedConfig, currentConfig());
-  els.generateButton.disabled = state.busy || !ready || !els.text.value.trim();
-  els.loadButton.disabled = state.busy || (state.backend === "webgpu" && !state.webgpu.available);
+function escapeRegExp(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function countWords(value) { return (String(value).trim().match(/[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu) || []).length; }
+function totalSentences() { return state.paragraphs.reduce((sum, paragraph) => sum + paragraph.sentences.length, 0); }
+
+function flattenSentences() {
+  const flat = [];
+  state.paragraphs.forEach((paragraph, paragraphIndex) => paragraph.sentences.forEach((sentence, sentenceIndex) => {
+    flat.push({ ...sentence, paragraphIndex, sentenceIndex });
+  }));
+  return flat;
 }
 
-function loadModel() {
-  if (state.busy) return;
-  if (state.backend === "webgpu" && !state.webgpu.available) {
-    showError(`WebGPU no está disponible: ${state.webgpu.reason}. Selecciona WASM para probar la generación local.`);
+function currentLocation() {
+  let index = Math.min(Math.max(state.cursor, 0), Math.max(0, totalSentences() - 1));
+  let count = 0;
+  for (let paragraphIndex = 0; paragraphIndex < state.paragraphs.length; paragraphIndex += 1) {
+    const length = state.paragraphs[paragraphIndex].sentences.length;
+    if (index < count + length) return { paragraphIndex, sentenceIndex: index - count, globalIndex: index };
+    count += length;
+  }
+  return { paragraphIndex: -1, sentenceIndex: -1, globalIndex: index };
+}
+
+function highlightCursor(scroll = false) {
+  const location = currentLocation();
+  els.paragraphs.querySelectorAll(".text-paragraph").forEach((article, index) => {
+    article.classList.toggle("is-current-paragraph", index === location.paragraphIndex);
+  });
+  els.paragraphs.querySelectorAll(".sentence").forEach((button) => {
+    const active = Number(button.dataset.paragraph) === location.paragraphIndex && Number(button.dataset.sentence) === location.sentenceIndex;
+    button.classList.toggle("is-current-sentence", active);
+    if (active) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  });
+  if (scroll) els.paragraphs.querySelector('.sentence[aria-current="true"]')?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  updateDiagnostics();
+}
+
+function startAt(index, reason = "Lectura iniciada") {
+  if (!state.synth) return setStatus("Este navegador no expone Web Speech API", "error");
+  const flat = flattenSentences();
+  if (!flat.length) return setStatus("Añade texto antes de reproducir", "error");
+  const voice = selectedVoice();
+  if (!voice) return setStatus("No hay una voz disponible", "error");
+  if (voice.localService !== true) return setStatus(voice.localService === false
+    ? "Voz remota según localService=false; se bloqueó por privacidad"
+    : "localService no disponible; se bloqueó la reproducción por privacidad", "error");
+  const token = ++state.token;
+  state.synth.cancel();
+  state.cursor = Math.min(Math.max(index, 0), flat.length - 1);
+  state.playing = true;
+  state.paused = false;
+  state.lastError = "Ninguno";
+  state.boundaryCount = 0;
+  state.events = [];
+  recordEvent(`cancel() previo a Play · ${reason}`);
+  setStatus(reason, "working");
+  highlightCursor(true);
+  speakCurrent(token);
+}
+
+function speakCurrent(token) {
+  if (token !== state.token || !state.playing || state.paused) return;
+  const flat = flattenSentences();
+  const item = flat[state.cursor];
+  if (!item) {
+    state.playing = false;
+    state.paused = false;
+    state.activeUtterance = null;
+    setStatus("Lectura completada", "success");
+    updateControls();
     return;
   }
-
-  const config = currentConfig();
-  stopWorker();
-  state.loadedConfig = null;
-  state.loadMs = null;
-  state.busy = true;
-  state.worker = createWorker();
-  sessionStorage.setItem("kokoro-benchmark-pending", "1");
-  setBusy(true, "Cargando modelo…");
-  setStatus("Cargando modelo…", "working");
-  els.modelState.textContent = "Cargando modelo…";
-  els.modelState.className = "quiet-state";
-  els.progressRegion.hidden = false;
-  setProgress(0, "Preparando la carga…");
-  state.latestLoadProgress = null;
-  console.info("[Kokoro Benchmark] Requesting model", config);
-  state.worker.postMessage({ type: "load", config, webgpuProbe: state.webgpu });
+  const voice = selectedVoice();
+  const utterance = new SpeechSynthesisUtterance(item.text.trim());
+  utterance.voice = voice;
+  utterance.lang = voice.lang || "es";
+  utterance.rate = state.rate;
+  state.activeUtterance = utterance;
+  const index = state.cursor;
+  utterance.onstart = (event) => {
+    if (token !== state.token) return;
+    state.playing = true;
+    state.paused = false;
+    state.cursor = index;
+    recordEvent("start", event);
+    setStatus(`Leyendo oración ${index + 1} de ${flat.length}`, "working");
+    highlightCursor(true);
+    updateControls();
+  };
+  utterance.onend = (event) => {
+    if (token !== state.token) return;
+    recordEvent("end", event);
+    state.cursor = index + 1;
+    highlightCursor(true);
+    if (state.cursor >= flat.length) {
+      state.playing = false;
+      state.paused = false;
+      state.activeUtterance = null;
+      setStatus("Lectura completada", "success");
+      updateControls();
+      return;
+    }
+    speakCurrent(token);
+  };
+  utterance.onerror = (event) => {
+    if (token !== state.token) return;
+    const error = event.error || "error no expuesto";
+    state.lastError = `${error}${event.message ? ` · ${event.message}` : ""}`;
+    recordEvent("error", event);
+    state.playing = false;
+    state.paused = false;
+    state.activeUtterance = null;
+    setStatus(`La síntesis reportó un error: ${state.lastError}`, "error");
+    updateControls();
+    updateDiagnostics();
+  };
+  utterance.onpause = (event) => {
+    if (token !== state.token) return;
+    state.paused = true;
+    recordEvent("pause", event);
+    setStatus("Pausado según el evento del navegador", "idle");
+    updateControls();
+  };
+  utterance.onresume = (event) => {
+    if (token !== state.token) return;
+    state.paused = false;
+    state.playing = true;
+    recordEvent("resume", event);
+    setStatus("Lectura reanudada", "working");
+    updateControls();
+  };
+  utterance.onboundary = (event) => {
+    if (token !== state.token) return;
+    const detail = `boundary · ${event.name || "tipo no expuesto"}${Number.isFinite(event.charIndex) ? ` · char ${event.charIndex}` : ""}`;
+    state.boundaryCount += 1;
+    recordEvent(detail, event, { consoleLog: false });
+  };
+  try {
+    state.synth.speak(utterance);
+    updateControls();
+  } catch (error) {
+    state.lastError = serializeError(error);
+    state.playing = false;
+    state.activeUtterance = null;
+    recordEvent(`speak() lanzó excepción: ${state.lastError}`);
+    setStatus(`No se pudo iniciar la síntesis: ${state.lastError}`, "error");
+    updateDiagnostics();
+    updateControls();
+  }
 }
 
-function generate() {
-  if (!sameConfig(state.loadedConfig, currentConfig()) || state.busy) return;
-  const text = els.text.value.trim();
-  if (!text) return;
+function stopPlayback(message = "Lectura detenida") {
+  invalidatePlayback();
+  recordEvent("cancel() solicitado por Stop");
+  setStatus(message, "idle");
+  updateControls();
+  updateDiagnostics();
+}
 
-  const input = {
-    text,
-    voice: els.voice.value,
-    testName: TESTS[state.currentTest]?.name ?? "Texto propio",
+function invalidatePlayback() {
+  state.token += 1;
+  state.synth?.cancel();
+  state.playing = false;
+  state.paused = false;
+  state.activeUtterance = null;
+}
+
+function moveSentence(direction) {
+  const total = totalSentences();
+  if (!total) return;
+  const target = Math.min(Math.max(state.cursor + direction, 0), total - 1);
+  startAt(target, direction < 0 ? "Oración anterior" : "Oración siguiente");
+}
+
+function moveParagraph(direction) {
+  const location = currentLocation();
+  if (location.paragraphIndex < 0) return;
+  const targetParagraph = Math.min(Math.max(location.paragraphIndex + direction, 0), state.paragraphs.length - 1);
+  const target = state.paragraphs.slice(0, targetParagraph).reduce((sum, paragraph) => sum + paragraph.sentences.length, 0);
+  startAt(target, direction < 0 ? "Párrafo anterior" : "Párrafo siguiente");
+}
+
+function recordEvent(name, event, { consoleLog = true } = {}) {
+  const detail = {
+    name,
+    time: new Date().toLocaleTimeString(),
+    charIndex: Number.isFinite(event?.charIndex) ? event.charIndex : null,
+    elapsedTime: Number.isFinite(event?.elapsedTime) ? event.elapsedTime : null,
+    boundary: event?.name || null,
+    error: event?.error || null,
   };
-  state.busy = true;
-  sessionStorage.setItem("kokoro-benchmark-pending", "1");
-  setBusy(true, "Generando audio…");
-  setStatus("Generando audio local…", "working");
-  els.progressRegion.hidden = false;
-  setProgress(0, "Preparando la síntesis…");
-  console.info("[Kokoro Benchmark] Starting generation", {
-    backendRequested: state.backend,
-    dtype: state.dtype,
-    voice: input.voice,
-    characters: [...text].length,
-    words: countWords(text),
-    testName: input.testName,
+  state.lastEvent = name;
+  state.events.unshift(detail);
+  state.events = state.events.slice(0, 8);
+  renderEventLog();
+  updateDiagnostics();
+  if (consoleLog) console.info("[Native TTS benchmark]", detail);
+}
+
+function renderEventLog() {
+  els.eventLog.replaceChildren();
+  if (state.events.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "Aún no hay eventos.";
+    els.eventLog.append(li);
+    return;
+  }
+  state.events.forEach((item) => {
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    time.textContent = item.time;
+    const detail = document.createElement("span");
+    const extras = [item.boundary, item.charIndex === null ? "" : `char ${item.charIndex}`, item.error].filter(Boolean).join(" · ");
+    detail.textContent = `${item.name}${extras ? ` · ${extras}` : ""}`;
+    li.append(time, detail);
+    els.eventLog.append(li);
   });
-  state.worker.postMessage({ type: "generate", request: input });
 }
 
-function createWorker() {
-  const worker = new Worker(new URL("./tts.worker.js", import.meta.url), { type: "module" });
-  worker.addEventListener("message", onWorkerMessage);
-  worker.addEventListener("error", onWorkerError);
-  worker.addEventListener("messageerror", onWorkerMessageError);
-  return worker;
+function updateDiagnostics() {
+  const voice = selectedVoice();
+  const location = currentLocation();
+  els.diagVoice.textContent = voice?.name || "Ninguna";
+  els.diagLocale.textContent = voice?.lang || "unavailable";
+  els.diagLocal.textContent = formatBoolean(voice?.localService);
+  els.diagRate.textContent = `${state.rate.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}×`;
+  els.diagParagraphs.textContent = String(state.paragraphs.length);
+  els.diagSentences.textContent = String(totalSentences());
+  els.diagCursor.textContent = location.paragraphIndex < 0 ? "—" : `P${location.paragraphIndex + 1} · O${location.sentenceIndex + 1}`;
+  els.diagEvent.textContent = state.lastEvent.startsWith("boundary") ? `${state.lastEvent} (${state.boundaryCount})` : state.lastEvent;
+  els.diagError.textContent = state.lastError;
 }
 
-function onWorkerMessage(event) {
-  const message = event.data;
-  switch (message?.type) {
-    case "load-progress":
-      state.latestLoadProgress = message.detail;
-      renderLoadProgress(message.detail);
-      break;
-    case "model-loaded":
-      state.busy = false;
-      state.loadedConfig = message.config;
-      state.loadMs = message.loadMs;
-      sessionStorage.removeItem("kokoro-benchmark-pending");
-      populateVoices(message.voices);
-      setBusy(false);
-      setProgress(100, `Modelo cargado en ${formatDurationMs(message.loadMs)}. Los datos de voz se cargan al generar.`);
-      setStatus("Modelo listo", "success");
-      updateModelState();
-      window.setTimeout(() => {
-        if (!state.busy) els.progressRegion.hidden = true;
-      }, 2200);
-      break;
-    case "generation-progress":
-      setProgress(
-        Math.round((message.completedChunks / message.totalChunks) * 100),
-        `Generando sección ${message.completedChunks} de ${message.totalChunks}…`,
-      );
-      break;
-    case "voice-preparing":
-      setProgress(0, `Preparando datos de voz ${message.voice} antes de medir…`);
-      break;
-    case "generation-complete":
-      state.busy = false;
-      sessionStorage.removeItem("kokoro-benchmark-pending");
-      setBusy(false);
-      els.progressRegion.hidden = true;
-      recordResult(message);
-      setStatus("Generación terminada", "success");
-      break;
-    case "operation-error":
-      handleOperationError(message);
-      break;
-    default:
-      console.warn("[Kokoro Benchmark] Unknown worker message", message);
+function updateControls() {
+  const total = totalSentences();
+  const voice = selectedVoice();
+  const usableVoice = voice?.localService === true;
+  const busy = state.playing || state.paused;
+  els.play.disabled = !state.synth || !usableVoice || !total || state.paused;
+  els.pause.disabled = !state.synth || !state.playing || state.paused;
+  els.resume.disabled = !state.synth || !state.paused;
+  els.stop.disabled = !state.synth || !busy;
+  els.previousSentence.disabled = !state.synth || !total || state.cursor <= 0;
+  els.repeatSentence.disabled = !state.synth || !total;
+  els.nextSentence.disabled = !state.synth || !total || state.cursor >= total - 1;
+  const location = currentLocation();
+  els.previousParagraph.disabled = !state.synth || !total || location.paragraphIndex <= 0;
+  els.nextParagraph.disabled = !state.synth || !total || location.paragraphIndex < 0 || location.paragraphIndex >= state.paragraphs.length - 1;
+  els.voiceSelect.disabled = !state.voices.length;
+  els.refreshVoices.disabled = !state.synth;
+  els.filterButtons.forEach((element) => { element.disabled = !state.voices.length; });
+  els.rate.disabled = !state.synth;
+}
+
+function updateStatusFromEngine() {
+  if (!state.synth) return;
+  if (state.synth.paused) {
+    state.paused = true;
+    state.playing = false;
+    setStatus("Safari informa que la lectura está pausada", "idle");
+  } else if (state.synth.speaking) {
+    state.paused = false;
+    state.playing = true;
+    setStatus("Safari informa que la lectura continúa", "working");
+  } else if (!state.synth.speaking && state.playing) {
+    state.playing = false;
+    setStatus("El motor no informa voz en curso; revisa si la lectura se detuvo", "idle");
   }
+  updateControls();
 }
 
-function onWorkerError(event) {
-  console.error("[Kokoro Benchmark] Worker error", event.message, event.error);
-  const stage = state.loadedConfig ? "generate" : "load";
-  handleOperationError({
-    stage,
-    failureCategory: stage === "generate" ? "inference" : "unknown-load",
-    name: event.error?.name ?? "WorkerError",
-    message: event.message || "El worker del modelo terminó inesperadamente.",
-    stack: event.error?.stack ?? "",
-    backend: state.backend,
-    dtype: state.dtype,
-    diagnostics: mainThreadFailureDiagnostics(stage, event.error, "El worker emitió un error; su fase interna no está disponible."),
-  });
+function setStatus(message, kind = "idle") {
+  els.statusText.textContent = message;
+  els.status.className = `status-pill ${kind}`;
 }
 
-function onWorkerMessageError(event) {
-  console.error("[Kokoro Benchmark] Worker message could not be decoded", event);
-  const stage = state.loadedConfig ? "generate" : "load";
-  handleOperationError({
-    stage,
-    failureCategory: stage === "generate" ? "inference" : "unknown-load",
-    name: "MessageError",
-    message: "La página no pudo decodificar un mensaje del worker. Safari no expuso la causa.",
-    backend: state.backend,
-    dtype: state.dtype,
-    diagnostics: mainThreadFailureDiagnostics(stage, null, "La página no pudo decodificar el mensaje del worker; la causa no está expuesta."),
-  });
-}
-
-function handleOperationError(error) {
-  state.busy = false;
-  sessionStorage.removeItem("kokoro-benchmark-pending");
-  setBusy(false);
-  els.progressRegion.hidden = true;
-  const message = friendlyError(error);
-  setStatus(error.stage === "load" ? "Falló la carga" : "Falló la inferencia", "error");
-  if (error.stage === "load") {
-    state.loadedConfig = null;
-    state.loadMs = null;
-    els.modelState.textContent = "No se pudo cargar";
-    els.modelState.className = "quiet-state stale";
-  }
-  els.latestSection.hidden = false;
-  els.resultStatus.textContent = "Error";
-  els.resultStatus.className = "badge danger";
-  const diagnostics = error.diagnostics ?? mainThreadFailureDiagnostics(
-    error.stage,
-    error,
-    "No hay datos suficientes para localizar la fase exacta.",
-  );
-  els.latestResult.innerHTML = `
-    <div class="error-panel">
-      <strong>${escapeHtml(message.title)}</strong>
-      <p>${escapeHtml(message.body)}</p>
-      <details><summary>Diagnóstico técnico</summary><pre>${escapeHtml(JSON.stringify({
-        category: error.failureCategory ?? diagnostics.category ?? "unknown-load",
-        stage: error.stage ?? "unavailable",
-        requestedBackend: error.backend ?? state.backend,
-        requestedDtype: error.dtype ?? state.dtype,
-        diagnostics,
-      }, null, 2))}</pre></details>
-    </div>
-  `;
-  showToast(message.title);
-  console.error("[Kokoro Benchmark] Operation failed", { ...error, friendly: message });
-  updateGenerateButton();
-}
-
-function friendlyError(error) {
-  const raw = `${error.name ?? ""} ${error.message ?? ""}`;
-  const category = error.failureCategory ?? (error.stage === "generate" ? "inference" : "unknown-load");
-  if (/out of memory|memory allocation|allocate.*memory|oom|not enough memory|memoryerror|array buffer allocation/i.test(raw)) {
-    return {
-      title: "Parece que Safari se quedó sin memoria.",
-      body: "El error menciona memoria. Safari también puede cerrar una pestaña por presión de memoria sin exponer la causa; consulta el detalle técnico antes de concluirlo.",
-    };
-  }
-  if (error.stage === "voice") {
-    return {
-      title: "No se pudieron cargar los datos de la voz.",
-      body: "Comprueba la conexión con Hugging Face y vuelve a intentarlo. Esta descarga se hace antes de iniciar el cronómetro de generación.",
-    };
-  }
-  if (category === "download-load") {
-    return {
-      title: "Fallo de descarga/carga",
-      body: "Los datos disponibles sitúan el fallo durante una solicitud o lectura de un recurso. Esto no demuestra una incompatibilidad de WebGPU ni de operadores. Revisa el asset, bytes, URL y estado HTTP del diagnóstico.",
-    };
-  }
-  if (category === "webgpu-initialization") {
-    return {
-      title: "Fallo al inicializar WebGPU",
-      body: "El error contiene una señal explícita de inicialización del proveedor WebGPU. No confirma por sí solo que un operador del modelo sea incompatible.",
-    };
-  }
-  if (category === "model-initialization") {
-    return {
-      title: "Fallo al inicializar modelo/ONNX Runtime",
-      body: "Transformers.js marcó como terminados los recursos observados antes del fallo. Kokoro.js no expone el punto exacto de inicialización de ONNX Runtime.",
-    };
-  }
-  if (error.stage === "generate" || category === "inference") {
-    return {
-      title: "Fallo durante la inferencia",
-      body: "El modelo ya había terminado de cargar, pero la generación no se completó. El detalle conserva el error original y los datos disponibles.",
-    };
-  }
-  return {
-    title: "Fallo desconocido durante la carga",
-    body: "La información expuesta no permite asignar con seguridad una causa más concreta. Backend solicitado: " + (error.backend === "webgpu" ? "WebGPU" : "WASM") + ". El detalle técnico indica qué datos están disponibles y cuáles no.",
-  };
-}
-
-function renderLoadProgress(detail = {}) {
-  let percent = Number.isFinite(detail.progress) ? detail.progress : 0;
-  if (percent > 1) percent /= 100;
-  const normalizedPercent = Math.max(0, Math.min(1, percent));
-  const file = String(detail.file || "recursos del modelo").split("/").pop();
-  let status = detail.status === "done" || normalizedPercent >= 1 ? `Recurso ${file} leído; preparando el modelo…` : `Descargando ${file}…`;
-  if (detail.loaded && detail.total) status += ` ${formatBytes(detail.loaded)} / ${formatBytes(detail.total)}`;
-  setProgress(Math.round(normalizedPercent * 100), status);
-}
-
-function setProgress(percent, text) {
-  els.progressRegion.hidden = false;
-  els.progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  els.progressText.textContent = text;
-}
-
-function setBusy(busy, label = "") {
-  state.busy = busy;
-  els.backendButtons.forEach((button) => { button.disabled = busy || (button.dataset.backend === "webgpu" && !state.webgpu.available); });
-  els.quantization.disabled = busy;
-  els.voice.disabled = busy;
-  els.testButtons.forEach((button) => { button.disabled = busy; });
-  els.text.disabled = busy;
-  els.loadButton.textContent = busy && label.startsWith("Cargando") ? label : "Load model";
-  els.generateButton.textContent = busy && label.startsWith("Generando") ? label : "Generate audio";
-  updateGenerateButton();
-}
-
-function populateVoices(voices) {
-  if (!voices || typeof voices !== "object") return;
-  const currentVoice = els.voice.value || "af_heart";
-  const entries = Object.entries(voices);
-  if (!entries.length) return;
-  els.voice.innerHTML = entries.map(([id, voice]) => {
-    const language = voice.language === "en-us" ? "Inglés estadounidense" : voice.language === "en-gb" ? "Inglés británico" : voice.language;
-    return `<option value="${escapeAttribute(id)}">${escapeHtml(`${id} · ${language} · ${voice.gender ?? "voz"}`)}</option>`;
-  }).join("");
-  els.voice.value = entries.some(([id]) => id === currentVoice) ? currentVoice : entries[0][0];
-  els.voice.disabled = state.busy;
-  updateGenerateButton();
-}
-
-function recordResult(data) {
-  const url = URL.createObjectURL(data.audio);
-  const characters = [...data.text].length;
-  const words = countWords(data.text);
-  const rtf = data.durationSeconds > 0 ? data.generationMs / 1000 / data.durationSeconds : null;
-  const result = {
-    ...data,
-    audioUrl: url,
-    characters,
-    words,
-    rtf,
-    realtimeMultiple: rtf && rtf > 0 ? 1 / rtf : null,
-    createdAt: new Date(),
-    loadMs: state.loadMs,
-  };
-  state.results.unshift(result);
-  els.latestSection.hidden = false;
-  els.resultStatus.textContent = "Éxito";
-  els.resultStatus.className = "badge success";
-  els.latestResult.innerHTML = renderResult(result, true);
-  renderHistory();
-  setStatus("Generación terminada", "success");
-}
-
-function renderResult(result, includeText) {
-  const backend = result.config.backend === "webgpu" ? "WebGPU" : "WASM";
-  const option = MODEL_OPTIONS[result.config.backend].find((item) => item.dtype === result.config.dtype);
-  const rtf = result.rtf === null ? "No calculable" : `${result.rtf.toFixed(3)}×`;
-  const speed = result.realtimeMultiple === null ? "No calculable" : `${result.realtimeMultiple.toFixed(2)}× tiempo real`;
-  return `
-    <div class="metric-grid">
-      ${metric("Backend solicitado", backend)}
-      ${metric("Backend confirmado", "No expuesto por Kokoro.js")}
-      ${metric("Modelo / cuantización", `Kokoro 82M · ${option?.title ?? result.config.dtype}`)}
-      ${metric("Voz", escapeHtml(result.voice))}
-      ${metric("Caracteres / palabras", `${formatInteger(result.characters)} / ${formatInteger(result.words)}`)}
-      ${metric("Tiempo de carga", formatDurationMs(result.loadMs))}
-      ${metric("Carga de voz (fuera de generación)", formatDurationMs(result.voiceLoadMs))}
-      ${metric("Tiempo de generación", formatDurationMs(result.generationMs))}
-      ${metric("Duración real del audio", formatDuration(result.durationSeconds))}
-      ${metric("RTF", rtf)}
-      ${metric("Velocidad", speed)}
-      ${metric("Tamaño del WAV", formatBytes(result.audioBytes))}
-      ${metric("Secciones sintetizadas", String(result.chunkCount))}
-    </div>
-    <p class="backend-disclosure">Se solicitó ${escapeHtml(backend)} al cargar el modelo. La API pública de Kokoro.js 1.2.1 no informa el proveedor de ejecución confirmado.</p>
-    <audio class="audio-player" controls playsinline preload="metadata" src="${escapeAttribute(result.audioUrl)}">Tu navegador no puede reproducir este audio.</audio>
-    ${includeText ? `<details class="result-text"><summary>Texto usado (${formatInteger(result.characters)} caracteres)</summary><p>${escapeHtml(result.text)}</p></details>` : ""}
-  `;
-}
-
-function metric(label, value) {
-  return `<div class="metric"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
-}
-
-function renderHistory() {
-  els.historySection.hidden = state.results.length === 0;
-  els.historyList.innerHTML = state.results.map((result, index) => {
-    const backend = result.config.backend === "webgpu" ? "WebGPU" : "WASM";
-    const configLabel = `${backend} · ${result.config.dtype.toUpperCase()}`;
-    const rtf = result.rtf === null ? "—" : result.rtf.toFixed(3);
-    return `
-      <article class="history-entry">
-        <div class="history-title"><span class="history-index">${String(state.results.length - index).padStart(2, "0")}</span><strong>${escapeHtml(configLabel)}</strong><span class="history-test">${escapeHtml(result.testName)}</span></div>
-        <div class="history-metrics"><span>RTF <b>${rtf}</b></span><span>Generación <b>${formatDurationMs(result.generationMs)}</b></span><span>Audio <b>${formatDuration(result.durationSeconds)}</b></span><span>Carga <b>${formatDurationMs(result.loadMs)}</b></span></div>
-        <audio class="audio-player compact-player" controls playsinline preload="none" src="${escapeAttribute(result.audioUrl)}">Tu navegador no puede reproducir este audio.</audio>
-      </article>
-    `;
-  }).join("");
-}
-
-function clearHistory() {
-  state.results.forEach((result) => URL.revokeObjectURL(result.audioUrl));
-  state.results = [];
-  els.historySection.hidden = true;
-  els.latestSection.hidden = true;
-  els.historyList.innerHTML = "";
-}
-
-function stopWorker() {
-  if (!state.worker) return;
-  state.worker.removeEventListener("message", onWorkerMessage);
-  state.worker.removeEventListener("error", onWorkerError);
-  state.worker.removeEventListener("messageerror", onWorkerMessageError);
-  state.worker.terminate();
-  state.worker = null;
-}
-
-function setStatus(text, type = "idle") {
-  els.statusText.textContent = text;
-  els.status.className = `status-pill ${type}`;
-}
-
-function showError(message) {
-  showToast(message);
-  setStatus("Requiere atención", "error");
-}
-
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.hidden = false;
-  window.clearTimeout(state.toastTimer);
-  state.toastTimer = window.setTimeout(() => { els.toast.hidden = true; }, 6500);
-}
-
-function checkInterruptedOperation() {
-  if (sessionStorage.getItem("kokoro-benchmark-pending") !== "1") return;
-  sessionStorage.removeItem("kokoro-benchmark-pending");
-  els.latestSection.hidden = false;
-  els.resultStatus.textContent = "Prueba interrumpida";
-  els.resultStatus.className = "badge warning";
-  els.latestResult.innerHTML = `<div class="error-panel interrupted"><strong>La página volvió a abrirse durante una operación.</strong><p>Safari no informa de forma fiable si cerró la pestaña por memoria u otra causa. El resultado anterior se perdió; vuelve a cargar un solo modelo y empieza con Short.</p></div>`;
-  setStatus("La operación anterior se interrumpió", "error");
-}
-
-function mainThreadFailureDiagnostics(stage, error, phase) {
-  return {
-    category: stage === "generate" ? "inference" : "unknown-load",
-    phase,
-    requestedBackend: state.backend,
-    modelId: MODEL_ID,
-    dtypeRequested: state.dtype,
-    webgpuAdapterProbe: state.backend === "webgpu" ? state.webgpu : "not requested",
-    webgpuDevice: "unavailable: not exposed by the library",
-    onnxRuntimeInitialization: "unavailable",
-    lastKnownAssetProgress: state.latestLoadProgress ?? "unavailable",
-    originalError: error ? {
-      name: error.name ?? "unavailable",
-      message: error.message ?? String(error),
-      stack: error.stack ?? "unavailable",
-      cause: error.cause?.message ?? "unavailable",
-    } : "unavailable",
-    unavailable: ["Safari does not reliably expose why it terminated a page or worker."],
-  };
-}
-
-function countWords(text) {
-  return text.trim() ? text.trim().split(/\s+/u).length : 0;
-}
-
-function formatDuration(seconds) {
-  if (!Number.isFinite(seconds)) return "—";
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds - minutes * 60;
-  return minutes > 0 ? `${minutes}:${remaining.toFixed(1).padStart(4, "0")} min` : `${remaining.toFixed(2)} s`;
-}
-
-function formatDurationMs(milliseconds) {
-  return Number.isFinite(milliseconds) ? `${(milliseconds / 1000).toFixed(2)} s` : "—";
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "—";
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
-}
-
-function formatInteger(value) {
-  return new Intl.NumberFormat("es-MX").format(value);
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/gu, (character) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[character]);
-}
-
-function escapeAttribute(value) {
-  return escapeHtml(value).replace(/`/gu, "&#96;");
+function serializeError(error) {
+  if (!error) return "error unavailable";
+  return `${error.name || "Error"}: ${error.message || "message unavailable"}`;
 }
 
 boot();
