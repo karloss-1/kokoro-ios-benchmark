@@ -54,6 +54,7 @@ const state = {
   lastEvent: "—",
   lastError: "Ninguno",
   boundaryCount: 0,
+  unconfirmedUtterances: 0,
   currentTest: "esShort",
 };
 
@@ -431,6 +432,7 @@ function startAt(index, reason = "Lectura iniciada") {
   state.paused = false;
   state.lastError = "Ninguno";
   state.boundaryCount = 0;
+  state.unconfirmedUtterances = 0;
   state.events = [];
   recordEvent(`cancel() previo a Play · ${reason}`);
   setStatus(reason, "working");
@@ -457,8 +459,10 @@ function speakCurrent(token) {
   utterance.rate = state.rate;
   state.activeUtterance = utterance;
   const index = state.cursor;
+  let startEventReceived = false;
   utterance.onstart = (event) => {
     if (token !== state.token) return;
+    startEventReceived = true;
     state.playing = true;
     state.paused = false;
     state.cursor = index;
@@ -469,14 +473,22 @@ function speakCurrent(token) {
   };
   utterance.onend = (event) => {
     if (token !== state.token) return;
-    recordEvent("end", event);
+    if (startEventReceived) {
+      recordEvent("end", event);
+    } else {
+      state.unconfirmedUtterances += 1;
+      state.lastError = `La oración terminó sin evento start (${state.unconfirmedUtterances}); audio no confirmado`;
+      recordEvent("end sin start · audio no confirmado", event);
+    }
     state.cursor = index + 1;
     highlightCursor(true);
     if (state.cursor >= flat.length) {
       state.playing = false;
       state.paused = false;
       state.activeUtterance = null;
-      setStatus("Lectura completada", "success");
+      setStatus(state.unconfirmedUtterances
+        ? `Lectura finalizada, pero faltó start en ${state.unconfirmedUtterances} oración(es); audio no confirmado`
+        : "Lectura completada", state.unconfirmedUtterances ? "error" : "success");
       updateControls();
       return;
     }
