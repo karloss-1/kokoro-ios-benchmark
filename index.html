@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#101820" />
+    <meta
+      name="description"
+      content="Benchmark local de Kokoro TTS para Safari en iPhone y iPad."
+    />
+    <title>Kokoro Benchmark</title>
+  </head>
+  <body>
+    <main id="app" class="shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">PRUEBA LOCAL · SAFARI MÓVIL</p>
+          <h1>Kokoro Benchmark</h1>
+          <p class="subtitle">Comprueba carga, síntesis y velocidad en este dispositivo.</p>
+        </div>
+        <div id="app-status" class="status-pill" role="status" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="status-text">Listo para configurar</span>
+        </div>
+      </header>
+
+      <section class="card device-card" aria-labelledby="device-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ESTE DISPOSITIVO</p>
+            <h2 id="device-heading">Device / Browser information</h2>
+          </div>
+          <span id="webgpu-badge" class="badge pending">WebGPU: comprobando</span>
+        </div>
+        <dl class="device-grid">
+          <div class="device-item ua-item">
+            <dt>User agent</dt>
+            <dd id="user-agent">—</dd>
+          </div>
+          <div class="device-item">
+            <dt>WebGPU disponible</dt>
+            <dd id="webgpu-status">Comprobando adaptador…</dd>
+          </div>
+          <div class="device-item">
+            <dt>Backend solicitado</dt>
+            <dd id="selected-backend">WASM</dd>
+          </div>
+          <div class="device-item">
+            <dt>Modelo seleccionado</dt>
+            <dd id="selected-model">Kokoro 82M · Q8</dd>
+          </div>
+          <div class="device-item">
+            <dt>Hardware concurrency</dt>
+            <dd id="hardware-concurrency">—</dd>
+          </div>
+          <div class="device-item">
+            <dt>Device memory</dt>
+            <dd id="device-memory">No expuesto por el navegador</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="card" aria-labelledby="setup-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">CONFIGURACIÓN</p>
+            <h2 id="setup-heading">Elige qué vas a medir</h2>
+          </div>
+          <span id="model-state" class="quiet-state">Modelo sin cargar</span>
+        </div>
+
+        <div class="control-grid">
+          <fieldset class="control-group">
+            <legend>Backend</legend>
+            <div class="segmented" role="group" aria-label="Backend solicitado">
+              <button class="segment" type="button" data-backend="webgpu" aria-pressed="false">WebGPU</button>
+              <button class="segment is-selected" type="button" data-backend="wasm" aria-pressed="true">WASM</button>
+            </div>
+            <p id="backend-note" class="help-text">WASM corre en el CPU y suele ser la prueba inicial más estable.</p>
+          </fieldset>
+
+          <label class="control-group" for="quantization">
+            <span class="label-text">Cuantización / modelo</span>
+            <select id="quantization" class="select-control"></select>
+            <p id="quantization-note" class="help-text"></p>
+          </label>
+
+          <label class="control-group" for="voice">
+            <span class="label-text">Voice</span>
+            <select id="voice" class="select-control">
+              <option value="af_heart">af_heart · Inglés estadounidense</option>
+            </select>
+            <p class="help-text">Voces compatibles de Kokoro 82M v1.0 (inglés).</p>
+          </label>
+        </div>
+
+        <div class="test-row">
+          <div>
+            <span class="label-text">Test</span>
+            <div class="test-buttons" role="group" aria-label="Textos de prueba">
+              <button class="test-button is-selected" type="button" data-test="short" aria-pressed="true">Short</button>
+              <button class="test-button" type="button" data-test="medium" aria-pressed="false">Medium</button>
+              <button class="test-button" type="button" data-test="long" aria-pressed="false">Long</button>
+            </div>
+          </div>
+          <p class="help-text test-hint">Textos en inglés para coincidir con las voces disponibles.</p>
+        </div>
+
+        <label class="control-group text-group" for="test-text">
+          <span class="label-text">Texto editable</span>
+          <textarea id="test-text" rows="6" spellcheck="true" autocapitalize="sentences"></textarea>
+          <span id="text-count" class="text-count">0 caracteres · 0 palabras</span>
+        </label>
+
+        <div class="action-row">
+          <button id="load-button" class="button button-secondary" type="button">Load model</button>
+          <button id="generate-button" class="button button-primary" type="button" disabled>Generate audio</button>
+        </div>
+        <div id="progress-region" class="progress-region" hidden>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <p id="progress-text" class="progress-text" aria-live="polite"></p>
+        </div>
+        <p class="privacy-note">La primera carga descarga los pesos y la voz desde Hugging Face. La síntesis se ejecuta en este dispositivo; el texto no se envía a un servicio de TTS.</p>
+      </section>
+
+      <section id="latest-section" class="card result-card" aria-labelledby="latest-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">ÚLTIMA PRUEBA</p>
+            <h2 id="latest-heading">Resultado</h2>
+          </div>
+          <span id="result-status" class="badge success">Éxito</span>
+        </div>
+        <div id="latest-result"></div>
+      </section>
+
+      <section id="history-section" class="card history-card" aria-labelledby="history-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">COMPARACIÓN</p>
+            <h2 id="history-heading">Historial de esta sesión</h2>
+          </div>
+          <button id="clear-history" class="text-button" type="button">Borrar</button>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+
+      <footer class="footer-note">
+        <p>Safari puede cerrar o recargar una pestaña si iOS necesita memoria. El navegador no siempre permite detectar la causa.</p>
+        <a href="https://github.com/karloss-1/kokoro-ios-benchmark" target="_blank" rel="noreferrer">README y código</a>
+      </footer>
+    </main>
+    <div id="toast" class="toast" role="alert" hidden></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
