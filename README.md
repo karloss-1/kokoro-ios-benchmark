@@ -1,55 +1,102 @@
-# Safari Native TTS Benchmark
+# Native TTS Benchmark
 
-Benchmark pequeño para decidir si la síntesis de voz nativa que Safari expone mediante `window.speechSynthesis` sirve para una futura experiencia de lectura en iPhone/iPad. No es la aplicación final: no contiene OCR, lectores PDF/EPUB, biblioteca, exportación de audio, almacenamiento de documentos ni PWA.
+Minimal iPhone/iPad benchmark for answering one question: can Apple's native AVSpeechSynthesizer read Spanish academic text clearly, reliably, and with useful playback controls?
 
-## Privacidad y funcionamiento
+This is a native SwiftUI app, not the document reader. It has no OCR, camera, PDF/EPUB support, storage, user accounts, external packages, backend, web view, or generated audio files.
 
-La página usa `SpeechSynthesisUtterance` y `speechSynthesis` del navegador; no incluye cliente, endpoint ni API de TTS. El texto se pasa al sintetizador elegido por el usuario en el sistema. Las voces cuyo `localService` sea `false` se muestran, pero Play se bloquea porque la especificación las clasifica como voces remotas y podrían enviar el texto al proveedor. `localService: true` indica un sintetizador local, pero no prueba por sí mismo que esa voz funcione offline en una situación concreta. No se guarda ni produce WAV/MP3.
+## Architecture
 
-## Dependencias
+- SpeechEngine.swift owns the AVSpeechSynthesizer, voice selection, playback state, audio session, interruption/route observers, and bounded diagnostics. It is separate from the SwiftUI screen so the engine can be reused if this approach works.
+- SpeechTypes.swift contains the voice filters, rate presets, playback states, and paragraph/sentence segmenter.
+- TestCorpus.swift contains Spanish Short (about 147 words), Spanish Medium (about 488 words), Spanish Long (about 1,341 words), and English Short.
+- ContentView.swift displays device/locale information, all system voices through a language filter, editable text, playback controls, current range highlighting, and diagnostics.
 
-- **Vite 8.3.0** como herramienta de desarrollo y compilación estática.
-- No hay dependencias de ejecución. Se eliminaron `kokoro-js`, Transformers.js, ONNX Runtime y los assets/modelos de inferencia.
-- GitHub Actions usa Node.js 24 y pnpm 12.6.0 para construir y desplegar `dist/`.
+Text is split at paragraph boundaries and then at sentence boundaries when a paragraph segment would exceed about 700 UTF-16 code units. The app queues one segment at a time rather than submitting the entire long reading as a single utterance. A very long individual sentence remains intact. willSpeakRangeOfSpeechString is used to highlight the corresponding range when iOS reports it; the benchmark does not assume every voice reports useful ranges.
 
-## Ejecutar y compilar
+## Apple APIs and deployment target
 
-Requiere Node.js 20.19+ (se recomienda Node 24) y pnpm:
+- SwiftUI for the app and interface.
+- AVFoundation: AVSpeechSynthesizer, AVSpeechUtterance, AVSpeechSynthesisVoice, AVAudioSession, and AVSpeechSynthesizerDelegate.
+- Foundation NSString paragraph/sentence enumeration preserves source ranges for segment position and optional highlighting.
+- UIKit UIDevice provides the generic device family and system version; the app does not try to identify a private hardware model.
+- iOS/iPadOS deployment target: 17.0. This is a modern baseline for the SwiftUI interface while keeping the benchmark usable on a broad set of devices. The project targets iPhone and iPad (TARGETED_DEVICE_FAMILY = 1,2).
+- No third-party dependencies. The project uses Swift 5 language mode for broad Xcode compatibility.
 
-```sh
-pnpm install
-pnpm dev
-pnpm build
-pnpm preview
-```
+Voice rows use the system-reported name, BCP 47 language, identifier, and quality (Default, Enhanced, or Premium). Spanish voices are ordered with es-MX first; the locale shown is the actual locale returned by iOS. The list includes every voice returned by AVSpeechSynthesisVoice.speechVoices() and can be filtered to Spanish, English, or All.
 
-La compilación es un sitio estático. `vite.config.js` mantiene rutas relativas para el subdirectorio de GitHub Pages. El workflow `.github/workflows/pages.yml` publica automáticamente cada push a `main`.
+## Rate presets
 
-## Uso
+Apple's AVSpeechUtterance.rate uses a bounded decimal rate. The app maps each label to AVSpeechUtteranceDefaultSpeechRate × label, clamped to Apple's AVSpeechUtteranceMinimumSpeechRate and AVSpeechUtteranceMaximumSpeechRate.
 
-1. Abre el sitio en Safari del iPhone/iPad, toca el filtro Spanish y revisa el locale reportado por cada voz. Si aparece `es-MX`, esa es la identificación regional que expuso el sistema; no se deduce el acento a partir del nombre.
-2. Escucha Spanish Short y evalúa especialmente los términos anatómicos. Prueba Medium y Long con la misma voz y velocidad.
-3. Usa Pause/Resume, los botones de navegación y los controles de velocidad. También puedes tocar una oración o el encabezado de un párrafo.
-4. Durante Long, prueba bloqueo de pantalla y cambio a otra app. Anota si continúa, se pausa, se detiene, se reanuda o Safari recarga.
-5. Compara voces cambiando la selección. Para aplicar la nueva voz durante una lectura, la página detiene la cola; vuelve a tocar Play.
+With Apple's current default constant of 0.5, the labels correspond to:
 
-El benchmark divide el texto en párrafos y oraciones. Prefiere `Intl.Segmenter` y usa un divisor sencillo de respaldo con una lista corta de abreviaturas comunes. Cada oración se envía como utterance independiente para permitir pausa/navegación y resaltar la posición. `boundary` se registra si el motor lo entrega, pero la interfaz no depende de él.
+| UI label | AVSpeechUtterance.rate |
+| --- | ---: |
+| 0.75× | 0.375 |
+| 1.0× | 0.500 |
+| 1.25× | 0.625 |
+| 1.5× | 0.750 |
+| 2.0× | 1.000 |
 
-## Diagnóstico y límites
+These are approximate settings, not a promise of an exact acoustic multiplier or words per minute. The selected raw AV rate is shown in diagnostics.
 
-El panel muestra las propiedades recibidas de `getVoices()`, posición, `rate` solicitado, eventos recientes y errores. `voiceschanged` vuelve a poblar la lista cuando el navegador notifica cambios. Safari puede devolver una lista vacía inicialmente o no exponer todas las voces instaladas; la página vuelve a consultarla durante los primeros segundos, incluye un botón para volver a detectar y ofrece filtros Spanish, English y All. `localService` y `default` se muestran literalmente como `true`, `false` o `unavailable`.
+## Audio session and background test
 
-La Web Speech API define `start`, `end`, `error`, `pause`, `resume` y `boundary`, pero una implementación solo tiene que proporcionar `boundary` si el sintetizador lo ofrece. La tasa es el valor solicitado al motor, no una medición de velocidad acústica. La API no define qué sucede con la cola si iOS oculta, suspende o termina Safari; este benchmark lo deja como prueba manual y registra cambios de visibilidad cuando Safari los notifica. Si iOS termina el proceso, la página no puede registrar por qué ocurrió. La función “Listen to Page” de Safari es una función integrada distinta y no demuestra que el TTS de esta página siga activo en segundo plano. No se presenta una prueba de escritorio como validación de iOS.
+The app configures AVAudioSession when speech starts:
 
-Una voz remota (`localService: false`) no se reproduce por privacidad. Una voz local (`true`) tampoco equivale a una prueba de modo avión: las implicaciones de conexión y latencia no están garantizadas por la propiedad.
+- Category: playback because spoken reading is the primary output.
+- Mode: spokenAudio, Apple's mode for continuous spoken content such as podcasts and audiobooks.
+- Options: none. Other audio is not mixed in by this benchmark.
 
-## Referencias consultadas
+The session is deactivated when reading ends or is cancelled, with notifyOthersOnDeactivation.
 
-- [WebKit: Web Speech API en Safari 14.1](https://webkit.org/blog/11648/new-webkit-features-in-safari-14-1/) (el artículo confirma que WebKit ya soportaba síntesis de voz en Safari y documenta el motor común para reconocimiento).
-- [Web Speech API, especificación de Speech Synthesis](https://webaudio.github.io/web-speech-api/#speechsynthesis) (métodos, eventos, lista de voces y significado de `localService`).
-- [MDN: SpeechSynthesis](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesis) y [SpeechSynthesisUtterance](https://developer.mozilla.org/en-US/docs/Web/API/SpeechSynthesisUtterance).
-- [WebKit bug 290497: voces descargadas que no aparecen en `getVoices()`](https://bugs.webkit.org/show_bug.cgi?id=290497) (reporte abierto; describe Safari 18 en macOS, no demuestra que cada iPhone tenga el mismo problema).
-- [WebKit: privacidad en Safari 26](https://webkit.org/blog/16993/news-from-wwdc25-web-technology-coming-this-fall-in-safari-26-beta/) (WebKit anunció que puede reducir la fiabilidad de la lista de voces para scripts conocidos de fingerprinting; no significa que toda página reciba una lista incompleta).
-- [Apple Support: escuchar una página en Safari para iPhone](https://support.apple.com/en-us/guide/iphone/iph449fc616c/ios) (función del lector integrado de Safari, distinta de esta prueba Web Speech).
+The app includes the audio value in UIBackgroundModes. Apple documents that playback plus the audio background mode allows playback to continue when the app backgrounds or the screen locks. This is appropriate for an app whose central purpose is reading aloud, and allows a real lock-screen/app-switch test. It does not keep the app alive by itself or bypass system interruptions. The app observes audio interruptions and route changes, records them, and leaves resuming after an interruption to the user.
 
-La pregunta final —calidad de la voz, continuidad real en background y estabilidad en textos largos— solo puede contestarse probándolo en el iPhone/iPad objetivo.
+## Privacy and voice availability
+
+The app contains no networking code and sends no text to an app server. It does not record audio or request microphone permission. iOS supplies the voices and may manage voice assets as part of the operating system. The app cannot prove that a particular voice works offline; quality describes Apple's voice tier, not a connectivity guarantee.
+
+## Open, sign, and install from Xcode
+
+1. Install a current stable Xcode on a Mac.
+2. Open NativeTTSBenchmark.xcodeproj from this repository.
+3. In Xcode, open Xcode > Settings > Accounts and add your Apple Account if it is not already present.
+4. Select the NativeTTSBenchmark project, then the NativeTTSBenchmark target. In Signing & Capabilities, enable Automatically manage signing and choose your Personal Team or development team. No certificate or provisioning profile is included in this repository.
+5. If Xcode reports that the provisional bundle identifier is already in use, replace com.karloss.NativeTTSBenchmark with a unique identifier in the target's Signing & Capabilities settings.
+6. Connect and unlock the iPhone/iPad, accept its Trust prompt if shown, then choose it from Xcode's run-destination menu. On a device that requires Developer Mode, enable it under Settings > Privacy & Security > Developer Mode and follow the restart confirmation.
+7. Press Run. No camera, photo library, microphone, or network permission is needed. Xcode installs this development build directly on the selected device; this is not App Store or TestFlight distribution.
+
+## Benchmark procedure
+
+1. Start with a local Spanish voice, preferably one whose system locale is es-MX; if none is available, use another Spanish locale and record it exactly.
+2. Listen to Spanish Short at 1.0× and assess the anatomical terms as well as naturalness and audible defects.
+3. Test Pause, wait five seconds, Resume, then Stop and start again.
+4. Try each rate preset and compare the perceived speed.
+5. Listen to Medium and Long. Note whether speech finishes, stalls, omits content, or the app stops responding.
+6. During Long, lock the screen, switch to another app, return, and note what happened. If possible, also observe an actual audio interruption and whether the app records it.
+7. Change the voice and repeat Short. Use English Short with an English voice for comparison.
+
+## What to report
+
+Record the iPhone/iPad model family shown by the app, iOS/iPadOS version, system locale, voice name/language/identifier/quality, selected rate label and raw AV rate, whether each text was audible and completed, any pronunciation or sound defects, Pause/Resume/Stop behavior, current range highlighting, interruption events, and what happened during lock screen and app switching. Include any Xcode console errors. Voice lists can differ by device, region, language settings, and installed system voice assets.
+
+## Known limits
+
+- This benchmark has not been validated on the target iPhone/iPad until it is installed and tested there.
+- System voices and their quality differ between devices. Enhanced and Premium voices require system voice assets; the app does not download model files.
+- The willSpeakRangeOfSpeechString callback is used when provided, but the app can continue without word-range highlights.
+- Sentence segmentation uses Foundation's sentence enumeration. Abbreviations and language-specific punctuation may still produce imperfect boundaries.
+- Rate is a control value, not a measured speaking-speed multiplier.
+- Background Audio allows the intended playback mode, but system interruptions, route changes, force quit, and OS policy still affect playback.
+
+## Apple documentation consulted
+
+- [AVSpeechSynthesizer](https://developer.apple.com/documentation/avfaudio/avspeechsynthesizer)
+- [AVSpeechSynthesizerDelegate](https://developer.apple.com/documentation/avfaudio/avspeechsynthesizerdelegate)
+- [AVSpeechSynthesisVoice](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoice)
+- [AVSpeechSynthesisVoiceQuality](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoicequality)
+- [AVSpeechUtterance.rate and rate constants](https://developer.apple.com/documentation/avfaudio/avspeechutterance/rate)
+- [AVAudioSession spokenAudio mode](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/spokenaudio)
+- [AVAudioSession playback category](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playback)
+- [Handling audio interruptions](https://developer.apple.com/documentation/avfaudio/handling-audio-interruptions)
+- [Xcode 26.6 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_6-release-notes)

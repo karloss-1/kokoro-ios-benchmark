@@ -1,3 +1,27 @@
-node_modules/
-dist/
+# Xcode user state and local workspace data
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+*.xcscmblueprint
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Build products
+DerivedData/
+build/
+*.app
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.appex
+
+# Swift Package Manager artifacts (no packages are currently used)
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
 .DS_Store
