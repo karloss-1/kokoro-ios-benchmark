@@ -1,433 +1,227 @@
 import AVFoundation
-import Combine
 import Foundation
-import UIKit
+import Observation
 
-final class SpeechEngine: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
-    @Published var sourceText = TestCorpus.spanishShort
-    @Published private(set) var sourceLabel = SampleText.spanishShort.rawValue
-    @Published private(set) var voices: [AVSpeechSynthesisVoice] = []
-    @Published var voiceFilter: VoiceFilter = .spanish
-    @Published var selectedVoiceIdentifier = ""
-    @Published var selectedRate: SpeechRatePreset = .normal
-    @Published private(set) var playbackState: PlaybackState = .ready
-    @Published private(set) var segments: [SpeechSegment] = []
-    @Published private(set) var currentSegmentIndex: Int?
-    @Published private(set) var currentSpokenRange: NSRange?
-    @Published private(set) var latestEvent = "Not started"
-    @Published private(set) var lastError: String?
-    @Published private(set) var recentEvents: [String] = []
-    @Published private(set) var audioSessionSummary = "Not activated"
-
-    private let synthesizer = AVSpeechSynthesizer()
-    private var activeUtterance: AVSpeechUtterance?
-    private var activeVoice: AVSpeechSynthesisVoice?
-    private var activeRate: Float = AVSpeechUtteranceDefaultSpeechRate
-    private var interruptionIsActive = false
-    private var stopWasRequested = false
-    private var notificationObservers: [NSObjectProtocol] = []
+/// Evolves the validated benchmark: one retained synthesizer, one utterance at a time,
+/// identity-filtered callbacks, and the same playback/spokenAudio session.
+@MainActor @Observable final class SpeechEngine: NSObject, AVSpeechSynthesizerDelegate {
+    private(set) var voices: [AVSpeechSynthesisVoice] = []
+    private(set) var state: PlaybackState = .ready
+    private(set) var documentID: UUID?
+    private(set) var title = ""
+    private(set) var content: ReadingDocument?
+    private(set) var units: [ReadingUnit] = []
+    private(set) var index = 0
+    private(set) var error: String?
+    private(set) var latestEvent = "Ready"
+    private(set) var actualVoice: AVSpeechSynthesisVoice?
+    private(set) var rate: Double = 1
+    @ObservationIgnored var positionChanged: (() -> Void)?
+    @ObservationIgnored var playbackChanged: (() -> Void)?
+    @ObservationIgnored private var synthesizer = AVSpeechSynthesizer()
+    @ObservationIgnored private var activeUtterance: AVSpeechUtterance?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    private var selectedVoiceID = ""
+    private var wantsPlayback = false
+    private var interrupted = false
+    private var totalCharacters = 0
 
     override init() {
         super.init()
         synthesizer.delegate = self
         synthesizer.usesApplicationAudioSession = true
-        installAudioObservers()
         refreshVoices()
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            Task { @MainActor [weak self] in self?.handleInterruption(type) }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            Task { @MainActor [weak self] in
+                if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue { self?.pause() }
+            }
+        })
+        observers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.resetAudioServices() }
+        })
     }
-
-    deinit {
-        notificationObservers.forEach(NotificationCenter.default.removeObserver)
+    isolated deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+        synthesizer.delegate = nil
+        synthesizer.stopSpeaking(at: .immediate)
     }
-
-    var selectedVoice: AVSpeechSynthesisVoice? {
-        voices.first { $0.identifier == selectedVoiceIdentifier }
+    var currentUnit: ReadingUnit? { units.indices.contains(index) ? units[index] : nil }
+    var isPlaying: Bool { state == .speaking }
+    var progress: Double {
+        if state == .finished { return 1 }
+        guard totalCharacters > 0, let currentUnit else { return 0 }
+        return Double(currentUnit.characterOffset) / Double(totalCharacters)
     }
-
-    var visibleVoices: [AVSpeechSynthesisVoice] {
-        switch voiceFilter {
-        case .spanish:
-            voices.filter { $0.language.lowercased().hasPrefix("es") }
-        case .english:
-            voices.filter { $0.language.lowercased().hasPrefix("en") }
-        case .all:
-            voices
-        }
+    var positionLabel: String {
+        guard let currentUnit, let content else { return "" }
+        let section = content.sections[currentUnit.section]
+        if let page = section.pageNumber { return "Page \(page) of \(content.originalPageCount ?? page)" }
+        return "Sentence \(index + 1) of \(units.count)"
     }
-
-    var wordCount: Int {
-        sourceText.split(whereSeparator: \.isWhitespace).count
-    }
-
-    var paragraphCount: Int {
-        Set(segments.map(\.paragraph)).count
-    }
-
-    var currentSegmentLabel: String {
-        guard let currentSegmentIndex, segments.indices.contains(currentSegmentIndex) else {
-            return "—"
-        }
-        let segment = segments[currentSegmentIndex]
-        return "P\(segment.paragraph) · \(currentSegmentIndex + 1)/\(segments.count)"
-    }
-
-    var canPause: Bool { playbackState == .speaking }
-    var canResume: Bool { playbackState == .paused || playbackState == .interrupted }
-    var canStop: Bool { playbackState.isActive }
-    var canStart: Bool { !playbackState.isActive }
-
     func refreshVoices() {
-        voices = AVSpeechSynthesisVoice.speechVoices().sorted(by: Self.voiceSort)
-        if !voices.contains(where: { $0.identifier == selectedVoiceIdentifier }) {
-            selectedVoiceIdentifier =
-                voices.first(where: { $0.language.caseInsensitiveCompare("es-MX") == .orderedSame })?.identifier
-                ?? voices.first(where: { $0.language.lowercased().hasPrefix("es") })?.identifier
-                ?? voices.first(where: {
-                    $0.language.caseInsensitiveCompare(AVSpeechSynthesisVoice.currentLanguageCode()) == .orderedSame
-                })?.identifier
-                ?? voices.first?.identifier
-                ?? ""
+        voices = AVSpeechSynthesisVoice.speechVoices().sorted {
+            func rank(_ language: String) -> Int { language.lowercased() == "es-mx" ? 0 : language.hasPrefix("es") ? 1 : language.hasPrefix("en") ? 2 : 3 }
+            if rank($0.language) != rank($1.language) { return rank($0.language) < rank($1.language) }
+            return ($0.language + $0.name).localizedStandardCompare($1.language + $1.name) == .orderedAscending
         }
-        record("Voice list refreshed", detail: "\(voices.count) voices")
     }
-
-    func selectVoice(_ voice: AVSpeechSynthesisVoice) {
-        guard !playbackState.isActive else { return }
-        selectedVoiceIdentifier = voice.identifier
-        record("Voice selected", detail: "\(voice.name) · \(voice.language)")
+    func configure(voiceID: String, rate: Double) {
+        let changed = selectedVoiceID != voiceID || self.rate != rate
+        selectedVoiceID = voiceID
+        self.rate = min(2, max(0.75, rate))
+        if changed, !units.isEmpty { seek(to: index, resume: isPlaying) }
     }
-
-    func load(_ sample: SampleText) {
-        guard !playbackState.isActive else { return }
-        sourceText = sample.text
-        sourceLabel = sample.rawValue
-        clearProgress()
-        lastError = nil
-        playbackState = .ready
+    func load(id: UUID, title: String, content: ReadingDocument, position: Int, completed: Bool) {
+        stop()
+        documentID = id
+        self.title = title
+        self.content = content
+        units = content.units
+        totalCharacters = units.reduce(0) { $0 + $1.text.count }
+        index = min(max(0, position), max(0, units.count - 1))
+        state = completed ? .finished : .ready
+        error = nil
     }
-
-    func updateCustomText(_ text: String) {
-        guard !playbackState.isActive else { return }
-        sourceText = text
-        sourceLabel = "Custom text"
-        clearProgress()
-    }
-
-    func speak() {
-        guard !playbackState.isActive else { return }
-        guard let voice = selectedVoice else {
-            fail("No available voice is selected. Refresh the voice list or install an iOS voice.")
-            return
-        }
-
-        let newSegments = TextSegmenter.segments(in: sourceText)
-        guard !newSegments.isEmpty else {
-            fail("Enter or select text before starting speech.")
-            return
-        }
-
+    func unload() { stop(); documentID = nil; content = nil; units = []; playbackChanged?() }
+    func play() {
+        guard !units.isEmpty, !interrupted else { return }
+        error = nil
         do {
             try activateAudioSession()
-        } catch {
-            fail("Could not activate AVAudioSession: \(error.localizedDescription)")
-            return
-        }
-
-        segments = newSegments
-        activeVoice = voice
-        activeRate = selectedRate.avSpeechRate
-        currentSegmentIndex = 0
-        currentSpokenRange = nil
-        lastError = nil
-        interruptionIsActive = false
-        stopWasRequested = false
-        playbackState = .speaking
-        record(
-            "Speak requested",
-            detail: "\(voice.name) · \(voice.language) · AVSpeechUtterance.rate \(Self.rateString(activeRate)) · \(newSegments.count) segments"
-        )
-        speakCurrentSegment()
+            wantsPlayback = true
+            if state == .finished { index = 0 }
+            if synthesizer.isPaused, activeUtterance != nil, synthesizer.continueSpeaking() {
+                state = .speaking
+                playbackChanged?()
+                return
+            }
+            invalidateUtterance()
+            speakCurrent()
+        } catch { fail("Audio could not start: \(error.localizedDescription)") }
     }
-
     func pause() {
-        guard synthesizer.pauseSpeaking(at: .immediate) else {
-            record("Pause request not accepted", detail: "synthesizer was not speaking")
-            return
-        }
-        record("Pause requested")
+        guard isPlaying else { return }
+        wantsPlayback = false
+        if !synthesizer.pauseSpeaking(at: .immediate) { invalidateUtterance() }
+        state = .paused
+        notify("Paused")
     }
-
-    func resume() {
-        guard synthesizer.continueSpeaking() else {
-            record("Resume request not accepted", detail: "system did not resume this utterance")
-            lastError = "Resume was not accepted by AVSpeechSynthesizer. Try Stop, then Speak again."
-            return
-        }
-        interruptionIsActive = false
-        record("Resume requested")
-    }
-
     func stop() {
-        guard playbackState.isActive else { return }
-        stopWasRequested = true
-        currentSpokenRange = nil
-        if synthesizer.stopSpeaking(at: .immediate) {
-            playbackState = .stopping
-            record("Stop requested")
-        } else {
-            activeUtterance = nil
-            currentSegmentIndex = nil
-            playbackState = .stopped
-            record("Stopped without active utterance")
-            deactivateAudioSession()
-        }
-    }
-
-    func recordAppState(_ phase: String) {
-        record("App state", detail: phase)
-    }
-
-    func qualityLabel(for voice: AVSpeechSynthesisVoice) -> String {
-        switch voice.quality {
-        case .default: "Default"
-        case .enhanced: "Enhanced"
-        case .premium: "Premium"
-        @unknown default: "Unknown"
-        }
-    }
-
-    private func speakCurrentSegment() {
-        guard let currentSegmentIndex,
-              segments.indices.contains(currentSegmentIndex),
-              let activeVoice else {
-            finishRun()
-            return
-        }
-
-        let segment = segments[currentSegmentIndex]
-        let utterance = AVSpeechUtterance(string: segment.text)
-        utterance.voice = activeVoice
-        utterance.rate = activeRate
-        utterance.preUtteranceDelay = 0
-        utterance.postUtteranceDelay = 0
-        activeUtterance = utterance
-        currentSpokenRange = nil
-        synthesizer.speak(utterance)
-    }
-
-    private func finishCurrentSegment() {
-        guard let currentSegmentIndex else {
-            finishRun()
-            return
-        }
-        let nextIndex = currentSegmentIndex + 1
-        if segments.indices.contains(nextIndex) {
-            self.currentSegmentIndex = nextIndex
-            speakCurrentSegment()
-        } else {
-            finishRun()
-        }
-    }
-
-    private func finishRun() {
-        activeUtterance = nil
-        currentSpokenRange = nil
-        playbackState = .finished
-        record("Reading finished")
+        wantsPlayback = false
+        invalidateUtterance()
+        state = .stopped
         deactivateAudioSession()
+        notify("Stopped")
     }
-
-    private func clearProgress() {
-        segments = []
-        currentSegmentIndex = nil
-        currentSpokenRange = nil
+    func seek(to destination: Int, resume: Bool? = nil) {
+        guard !units.isEmpty else { return }
+        let shouldPlay = resume ?? isPlaying
+        wantsPlayback = false
+        invalidateUtterance()
+        index = min(max(destination, 0), units.count - 1)
+        state = .paused
+        notify("Position changed")
+        if shouldPlay { play() }
     }
-
+    func seek(progress: Double) {
+        let target = Int(min(1, max(0, progress)) * Double(totalCharacters))
+        let nearest = units.min { abs($0.characterOffset - target) < abs($1.characterOffset - target) }?.id ?? 0
+        seek(to: nearest)
+    }
+    func sentence(_ delta: Int) { seek(to: index + delta) }
+    func paragraph(_ delta: Int) {
+        guard let currentUnit else { return }
+        let starts = units.filter { unit in
+            unit.id == 0 || units[unit.id - 1].section != unit.section || units[unit.id - 1].paragraph != unit.paragraph
+        }
+        let target: ReadingUnit?
+        if delta > 0 { target = starts.first { $0.id > index && ($0.section != currentUnit.section || $0.paragraph != currentUnit.paragraph) } }
+        else { target = starts.last { $0.id < index && ($0.section != currentUnit.section || $0.paragraph != currentUnit.paragraph) } ?? starts.first }
+        if let target { seek(to: target.id) }
+    }
+    private func speakCurrent() {
+        guard let unit = currentUnit else { return }
+        refreshVoices()
+        let language = content?.language ?? "es"
+        let voice = AVSpeechSynthesisVoice(identifier: selectedVoiceID)
+            ?? voices.first { $0.language.hasPrefix(language) }
+            ?? AVSpeechSynthesisVoice(language: language)
+            ?? voices.first
+        guard let voice else { fail("No system voice is available. Install a voice in iOS Settings and try again."); return }
+        actualVoice = voice
+        let utterance = AVSpeechUtterance(string: unit.text)
+        utterance.voice = voice
+        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, max(AVSpeechUtteranceMinimumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * Float(rate)))
+        activeUtterance = utterance
+        state = .speaking
+        synthesizer.speak(utterance)
+        notify("Speaking sentence \(index + 1)")
+    }
+    private func invalidateUtterance() {
+        // Clear identity BEFORE stop; a delayed didCancel for the old utterance must
+        // never cancel or advance a new seek/voice/rate request.
+        activeUtterance = nil
+        synthesizer.stopSpeaking(at: .immediate)
+    }
     private func activateAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .spokenAudio, options: [])
         try session.setActive(true)
-        audioSessionSummary = "playback · spokenAudio · no options"
-        record("Audio session active", detail: audioSessionSummary)
     }
-
     private func deactivateAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setActive(
-                false,
-                options: [.notifyOthersOnDeactivation]
-            )
-            audioSessionSummary = "Inactive"
-            record("Audio session deactivated")
-        } catch {
-            lastError = "Audio session deactivation: \(error.localizedDescription)"
-            record("Audio session deactivation error", detail: error.localizedDescription)
-        }
+        do { try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+        catch { print("[Reader] Audio deactivation: \(error)") }
     }
-
-    private func installAudioObservers() {
-        let center = NotificationCenter.default
-        notificationObservers.append(
-            center.addObserver(
-                forName: AVAudioSession.interruptionNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleInterruption(notification)
-            }
-        )
-        notificationObservers.append(
-            center.addObserver(
-                forName: AVAudioSession.routeChangeNotification,
-                object: AVAudioSession.sharedInstance(),
-                queue: .main
-            ) { [weak self] notification in
-                self?.handleRouteChange(notification)
-            }
-        )
-    }
-
-    private func handleInterruption(_ notification: Notification) {
-        guard let rawType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: rawType) else {
-            record("Audio interruption", detail: "unavailable type")
-            return
-        }
-
-        switch type {
-        case .began:
-            interruptionIsActive = true
-            let accepted = synthesizer.pauseSpeaking(at: .immediate)
-            playbackState = .interrupted
-            record("Audio interruption began", detail: accepted ? "speech pause requested" : "speech pause unavailable")
-        case .ended:
-            let options = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt
-            interruptionIsActive = false
-            if synthesizer.isPaused {
-                playbackState = .paused
-            } else if synthesizer.isSpeaking {
-                playbackState = .speaking
-            }
-            record("Audio interruption ended", detail: "resume hint \(options.map(String.init) ?? "unavailable"); resume is manual")
-        @unknown default:
-            record("Audio interruption", detail: "unknown type \(rawType)")
-        }
-    }
-
-    private func handleRouteChange(_ notification: Notification) {
-        let reason = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).map(String.init) ?? "unavailable"
-        record("Audio route changed", detail: "reason \(reason)")
-    }
-
-    private func fail(_ message: String) {
-        lastError = message
-        playbackState = .failed
-        record("Error", detail: message)
-        deactivateAudioSession()
-    }
-
-    private func record(_ event: String, detail: String? = nil) {
-        let timestamp = Date.now.formatted(date: .omitted, time: .standard)
-        let line = detail.map { "\(timestamp) · \(event): \($0)" } ?? "\(timestamp) · \(event)"
-        latestEvent = event
-        recentEvents.insert(line, at: 0)
-        recentEvents = Array(recentEvents.prefix(6))
-        print("[NativeTTSBenchmark] \(line)")
-    }
-
-    private func onMain(_ action: @escaping (SpeechEngine) -> Void) {
-        if Thread.isMainThread {
-            action(self)
+    private func handleInterruption(_ type: UInt?) {
+        guard let type else { return }
+        if type == AVAudioSession.InterruptionType.began.rawValue {
+            guard state == .speaking || state == .paused else { return }
+            pause(); interrupted = true; state = .interrupted; notify("Audio interrupted")
         } else {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                action(self)
-            }
+            interrupted = false
+            if state == .interrupted { state = .paused; notify("Interruption ended; ready to resume") }
         }
     }
-
-    private static func voiceSort(_ left: AVSpeechSynthesisVoice, _ right: AVSpeechSynthesisVoice) -> Bool {
-        func priority(_ language: String) -> Int {
-            let normalized = language.lowercased()
-            if normalized == "es-mx" { return 0 }
-            if normalized.hasPrefix("es") { return 1 }
-            if normalized.hasPrefix("en") { return 2 }
-            return 3
-        }
-        let leftPriority = priority(left.language)
-        let rightPriority = priority(right.language)
-        if leftPriority != rightPriority { return leftPriority < rightPriority }
-        if left.language != right.language {
-            return left.language.localizedStandardCompare(right.language) == .orderedAscending
-        }
-        return left.name.localizedStandardCompare(right.name) == .orderedAscending
+    private func resetAudioServices() {
+        invalidateUtterance()
+        synthesizer = AVSpeechSynthesizer()
+        synthesizer.delegate = self
+        synthesizer.usesApplicationAudioSession = true
+        wantsPlayback = false
+        interrupted = false
+        state = .paused
+        notify("Audio services reset; ready to resume")
     }
-
-    private static func rateString(_ rate: Float) -> String {
-        String(format: "%.2f", rate)
-    }
-
-    // Delegate callbacks are marshalled to the main queue before publishing UI state.
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        onMain { engine in
-            guard engine.activeUtterance === utterance else { return }
-            engine.playbackState = engine.interruptionIsActive ? .interrupted : .speaking
-            engine.record("didStart", detail: engine.currentSegmentLabel)
+    private func fail(_ message: String) { error = message; wantsPlayback = false; state = .failed; deactivateAudioSession(); notify(message) }
+    private func notify(_ event: String) { latestEvent = event; print("[Reader] \(event)"); positionChanged?(); playbackChanged?() }
+    private func receive(_ event: String, id: ObjectIdentifier) {
+        guard let activeUtterance, ObjectIdentifier(activeUtterance) == id else { return }
+        switch event {
+        case "didFinish":
+            self.activeUtterance = nil
+            if index + 1 < units.count {
+                index += 1
+                if wantsPlayback { speakCurrent() } else { state = .paused; notify("Paused at next sentence") }
+            } else { state = .finished; wantsPlayback = false; deactivateAudioSession(); notify("Reading complete") }
+        case "didCancel": self.activeUtterance = nil; fail("Speech was cancelled by the system. Tap Play to resume this sentence.")
+        case "didPause": state = .paused; notify(event)
+        case "didContinue", "didStart": if wantsPlayback { state = .speaking }; notify(event)
+        default: break
         }
     }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange, utterance: AVSpeechUtterance) {
-        onMain { engine in
-            guard engine.activeUtterance === utterance,
-                  let index = engine.currentSegmentIndex,
-                  engine.segments.indices.contains(index) else { return }
-            let sourceStart = engine.segments[index].sourceRange.location
-            engine.currentSpokenRange = NSRange(
-                location: sourceStart + characterRange.location,
-                length: characterRange.length
-            )
-        }
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) {
-        onMain { engine in
-            guard engine.activeUtterance === utterance else { return }
-            engine.playbackState = engine.interruptionIsActive ? .interrupted : .paused
-            engine.record("didPause", detail: engine.currentSegmentLabel)
-        }
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) {
-        onMain { engine in
-            guard engine.activeUtterance === utterance else { return }
-            engine.interruptionIsActive = false
-            engine.playbackState = .speaking
-            engine.record("didContinue", detail: engine.currentSegmentLabel)
-        }
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        onMain { engine in
-            guard engine.activeUtterance === utterance else { return }
-            engine.record("didFinish", detail: engine.currentSegmentLabel)
-            engine.activeUtterance = nil
-            engine.currentSpokenRange = nil
-            engine.finishCurrentSegment()
-        }
-    }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        onMain { engine in
-            engine.record("didCancel", detail: engine.currentSegmentLabel)
-            guard engine.activeUtterance === utterance else { return }
-            engine.activeUtterance = nil
-            engine.currentSpokenRange = nil
-            engine.currentSegmentIndex = nil
-            engine.playbackState = engine.stopWasRequested ? .stopped : .failed
-            if !engine.stopWasRequested {
-                engine.lastError = "AVSpeechSynthesizer cancelled the active utterance."
-            }
-            engine.stopWasRequested = false
-            engine.deactivateAudioSession()
-        }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) { relay("didStart", utterance) }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) { relay("didFinish", utterance) }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) { relay("didPause", utterance) }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) { relay("didContinue", utterance) }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { relay("didCancel", utterance) }
+    nonisolated private func relay(_ event: String, _ utterance: AVSpeechUtterance) {
+        let id = ObjectIdentifier(utterance)
+        Task { @MainActor [weak self] in self?.receive(event, id: id) }
     }
 }

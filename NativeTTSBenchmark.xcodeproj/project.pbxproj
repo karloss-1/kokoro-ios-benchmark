@@ -10,7 +10,21 @@
 		000000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000011 /* ContentView.swift */; };
 		000000000000000000000022 /* SpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000012 /* SpeechEngine.swift */; };
 		000000000000000000000023 /* SpeechTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000013 /* SpeechTypes.swift */; };
-		000000000000000000000024 /* TestCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000014 /* TestCorpus.swift */; };
+		0E9CEEA469D5C8C5640C3B87 /* DocumentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE71B779B89FCC964CEE6EF9; };
+		590470641CB71D84E2869109 /* LibraryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A115450D59ED2868BF1B6BA; };
+		84AF80C9D2BFACBDCEC9AD48 /* LibraryStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 750ED548AA26842C09B5F0F4; };
+		5A2D1065114C409C2D17C84B /* ReaderSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B0AC5A0DCFC6ECAE6E431B1; };
+		117BA1996625D59FF96C7B95 /* ReaderStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47EB5E83ACC69BB01F8BE285; };
+		63C680AA723F7F1966972B54 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E35A8601C65D15DDA3AB93A; };
+		EF8431AC2777E551414F7BB6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F557E7613C522594926CEB0D; };
+		3ED851C02F91B8060151213B /* DocumentExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BE7542DA70BD500BFFDD5E7; };
+		5A311508F99D007578C764EF /* ImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE4245D6CF7226ED554A271; };
+		672CB6BA3167E34D6AC71E07 /* ImportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B14CAC7B127A476B5DC84D7; };
+		7C8FEC95403BC0BF316C5D97 /* DocumentScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF40A51BA8B59830DECE60A3; };
+        A11111111111111111111111 /* ReadiumShared in Frameworks */ = {isa = PBXBuildFile; productRef = A22222222222222222222222; };
+        A33333333333333333333333 /* ReadiumStreamer in Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444444; };
+		641DF6EA749766CD48152CF9 /* EPUBService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F370344D1C02040280C32269; };
+		AA2E2F2EC5E0045F4797DC13 /* SystemMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8681B993BC59B394A6D3FFA9; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,16 +32,28 @@
 		000000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		000000000000000000000012 /* SpeechEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEngine.swift; sourceTree = "<group>"; };
 		000000000000000000000013 /* SpeechTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTypes.swift; sourceTree = "<group>"; };
-		000000000000000000000014 /* TestCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestCorpus.swift; sourceTree = "<group>"; };
 		000000000000000000000015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		000000000000000000000040 /* NativeTTSBenchmark.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NativeTTSBenchmark.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AE71B779B89FCC964CEE6EF9 /* DocumentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentModel.swift; sourceTree = "<group>"; };
+		5A115450D59ED2868BF1B6BA /* LibraryController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryController.swift; sourceTree = "<group>"; };
+		750ED548AA26842C09B5F0F4 /* LibraryStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStorage.swift; sourceTree = "<group>"; };
+		6B0AC5A0DCFC6ECAE6E431B1 /* ReaderSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderSettings.swift; sourceTree = "<group>"; };
+		47EB5E83ACC69BB01F8BE285 /* ReaderStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStyle.swift; sourceTree = "<group>"; };
+		6E35A8601C65D15DDA3AB93A /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		F557E7613C522594926CEB0D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		7BE7542DA70BD500BFFDD5E7 /* DocumentExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentExtractor.swift; sourceTree = "<group>"; };
+		CEE4245D6CF7226ED554A271 /* ImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportCoordinator.swift; sourceTree = "<group>"; };
+		9B14CAC7B127A476B5DC84D7 /* ImportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportViews.swift; sourceTree = "<group>"; };
+		FF40A51BA8B59830DECE60A3 /* DocumentScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentScanner.swift; sourceTree = "<group>"; };
+		F370344D1C02040280C32269 /* EPUBService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EPUBService.swift; sourceTree = "<group>"; };
+		8681B993BC59B394A6D3FFA9 /* SystemMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMedia.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		000000000000000000000031 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (A11111111111111111111111, A33333333333333333333333);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -45,10 +71,22 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* NativeTTSBenchmarkApp.swift */,
+				8681B993BC59B394A6D3FFA9 /* SystemMedia.swift */,
+				F370344D1C02040280C32269 /* EPUBService.swift */,
+				FF40A51BA8B59830DECE60A3 /* DocumentScanner.swift */,
+				9B14CAC7B127A476B5DC84D7 /* ImportViews.swift */,
+				CEE4245D6CF7226ED554A271 /* ImportCoordinator.swift */,
+				7BE7542DA70BD500BFFDD5E7 /* DocumentExtractor.swift */,
+				F557E7613C522594926CEB0D /* SettingsView.swift */,
+				6E35A8601C65D15DDA3AB93A /* ReaderView.swift */,
+				47EB5E83ACC69BB01F8BE285 /* ReaderStyle.swift */,
+				6B0AC5A0DCFC6ECAE6E431B1 /* ReaderSettings.swift */,
+				750ED548AA26842C09B5F0F4 /* LibraryStorage.swift */,
+				5A115450D59ED2868BF1B6BA /* LibraryController.swift */,
+				AE71B779B89FCC964CEE6EF9 /* DocumentModel.swift */,
 				000000000000000000000011 /* ContentView.swift */,
 				000000000000000000000012 /* SpeechEngine.swift */,
 				000000000000000000000013 /* SpeechTypes.swift */,
-				000000000000000000000014 /* TestCorpus.swift */,
 				000000000000000000000015 /* Info.plist */,
 			);
 			path = NativeTTSBenchmark;
@@ -79,6 +117,7 @@
 			productName = NativeTTSBenchmark;
 			productReference = 000000000000000000000040 /* NativeTTSBenchmark.app */;
 			productType = "com.apple.product-type.application";
+            packageProductDependencies = (A22222222222222222222222, A44444444444444444444444);
 		};
 /* End PBXNativeTarget section */
 
@@ -101,6 +140,7 @@
 			productRefGroup = 000000000000000000000004;
 			projectDirPath = "";
 			projectRoot = "";
+            packageReferences = (A55555555555555555555555);
 			targets = (
 				000000000000000000000005 /* NativeTTSBenchmark */,
 			);
@@ -122,24 +162,43 @@
 			buildActionMask = 2147483647;
 			files = (
 				000000000000000000000020 /* NativeTTSBenchmarkApp.swift in Sources */,
+				AA2E2F2EC5E0045F4797DC13 /* SystemMedia.swift in Sources */,
+				641DF6EA749766CD48152CF9 /* EPUBService.swift in Sources */,
+				7C8FEC95403BC0BF316C5D97 /* DocumentScanner.swift in Sources */,
+				672CB6BA3167E34D6AC71E07 /* ImportViews.swift in Sources */,
+				5A311508F99D007578C764EF /* ImportCoordinator.swift in Sources */,
+				3ED851C02F91B8060151213B /* DocumentExtractor.swift in Sources */,
+				EF8431AC2777E551414F7BB6 /* SettingsView.swift in Sources */,
+				63C680AA723F7F1966972B54 /* ReaderView.swift in Sources */,
+				117BA1996625D59FF96C7B95 /* ReaderStyle.swift in Sources */,
+				5A2D1065114C409C2D17C84B /* ReaderSettings.swift in Sources */,
+				84AF80C9D2BFACBDCEC9AD48 /* LibraryStorage.swift in Sources */,
+				590470641CB71D84E2869109 /* LibraryController.swift in Sources */,
+				0E9CEEA469D5C8C5640C3B87 /* DocumentModel.swift in Sources */,
 				000000000000000000000021 /* ContentView.swift in Sources */,
 				000000000000000000000022 /* SpeechEngine.swift in Sources */,
 				000000000000000000000023 /* SpeechTypes.swift in Sources */,
-				000000000000000000000024 /* TestCorpus.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+        A55555555555555555555555 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/readium/swift-toolkit.git"; requirement = {kind = exactVersion; version = 3.11.0; }; };
+/* End XCRemoteSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+        A22222222222222222222222 = {isa = XCSwiftPackageProductDependency; package = A55555555555555555555555; productName = ReadiumShared; };
+        A44444444444444444444444 = {isa = XCSwiftPackageProductDependency; package = A55555555555555555555555; productName = ReadiumStreamer; };
+/* End XCSwiftPackageProductDependency section */
 /* Begin XCBuildConfiguration section */
 		000000000000000000000050 /* Debug project */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -148,9 +207,9 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -161,7 +220,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NativeTTSBenchmark/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -171,8 +230,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -184,7 +243,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NativeTTSBenchmark/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -194,8 +253,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_STRICT_CONCURRENCY = minimal;
-				SWIFT_VERSION = 5.0;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;

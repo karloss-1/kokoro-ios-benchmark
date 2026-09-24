@@ -1,362 +1,185 @@
-import AVFoundation
 import SwiftUI
-import UIKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var engine = SpeechEngine()
-    @Environment(\.scenePhase) private var scenePhase
-
-    private var highlightedText: AttributedString {
-        var text = AttributedString(engine.sourceText)
-        guard let range = engine.currentSpokenRange,
-              let attributedRange = Range(range, in: text) else {
-            return text
+    @Bindable var library: LibraryController
+    @Environment(\.scenePhase) private var phase
+    var body: some View {
+        TabView {
+            Tab("Library", systemImage: "book.fill") { LibraryView(library: library) }
+            Tab("Settings", systemImage: "gearshape") { SettingsView(settings: library.settings, speech: library.speech) }
         }
-        text[attributedRange].backgroundColor = Color.yellow.opacity(0.42)
-        text[attributedRange].font = .system(size: 16, weight: .semibold)
-        return text
+        .onChange(of: phase) { _, value in
+            if value != .active { library.savePosition() }
+            else { library.speech.refreshVoices() }
+        }
+        .alert("Unable to complete action", isPresented: Binding(get: { library.error != nil }, set: { if !$0 { library.error = nil } })) {
+            Button("OK", role: .cancel) { library.error = nil }
+        } message: { Text(library.error ?? "") }
     }
+}
 
-    private var editableText: Binding<String> {
-        Binding(
-            get: { engine.sourceText },
-            set: { engine.updateCustomText($0) }
-        )
+struct LibraryView: View {
+    @Bindable var library: LibraryController
+    @State private var search = ""
+    @State private var sort = "Last Opened"
+    @State private var adding = false
+    @State private var showingReader = false
+    @State private var renameTarget: LibraryDocument?
+    @State private var renameTitle = ""
+    @State private var deleteTarget: LibraryDocument?
+    @State private var export: TextExport?
+    @State private var exporting = false
+    @State private var exportName = "Document"
+    var visible: [LibraryDocument] {
+        library.documents.filter { search.isEmpty || $0.title.localizedCaseInsensitiveContains(search) }.sorted {
+            switch sort {
+            case "Title": $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            case "Date Added": $0.importedAt > $1.importedAt
+            default: ($0.lastOpenedAt ?? .distantPast) > ($1.lastOpenedAt ?? .distantPast)
+            }
+        }
     }
-
+    var recent: LibraryDocument? { library.documents.filter { $0.lastOpenedAt != nil && $0.progress < 1 }.max { ($0.lastOpenedAt ?? .distantPast) < ($1.lastOpenedAt ?? .distantPast) } }
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    deviceCard
-                    voiceCard
-                    textCard
-                    playbackCard
-                    diagnosticsCard
-                    privacyNote
-                }
-                .padding(16)
-                .frame(maxWidth: 720)
-                .frame(maxWidth: .infinity)
-            }
-            .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("Native TTS Benchmark")
-            .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: scenePhase) { _, phase in
-                engine.recordAppState(String(describing: phase))
-            }
-        }
-    }
-
-    private var deviceCard: some View {
-        card {
-            sectionTitle("Device", icon: "iphone")
-            diagnosticRow("Device", value: UIDevice.current.model)
-            diagnosticRow("iOS / iPadOS", value: UIDevice.current.systemVersion)
-            diagnosticRow("Locale", value: Locale.current.identifier)
-            diagnosticRow("Speech language", value: AVSpeechSynthesisVoice.currentLanguageCode())
-        }
-    }
-
-    private var voiceCard: some View {
-        card {
-            HStack(alignment: .firstTextBaseline) {
-                sectionTitle("Voice", icon: "waveform")
-                Spacer()
-                Text("\(engine.visibleVoices.count) / \(engine.voices.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-
-            Picker("Filter voices", selection: $engine.voiceFilter) {
-                ForEach(VoiceFilter.allCases) { filter in
-                    Text(filter.rawValue).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            if engine.visibleVoices.isEmpty {
-                ContentUnavailableView(
-                    "No voices in this filter",
-                    systemImage: "waveform.slash",
-                    description: Text("Refresh the list or check which voices are installed in iOS Settings.")
-                )
-                .frame(minHeight: 110)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(engine.visibleVoices, id: \.identifier) { voice in
-                            voiceRow(voice)
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Search your library…", text: $search).accessibilityIdentifier("librarySearch")
+                    }.padding(14).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 16))
+                    if search.isEmpty, let recent {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).tracking(0.7).foregroundStyle(ReaderStyle.green)
+                            HStack(spacing: 14) {
+                                Button { open(recent) } label: {
+                                    HStack(spacing: 14) {
+                                        DocumentThumbnail(document: recent)
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            Text(recent.title).font(.headline).foregroundStyle(.primary)
+                                            Text(recent.sectionTitle ?? recent.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                                            ProgressView(value: recent.progress)
+                                            Text("\(Int(recent.progress * 100))% complete").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }.buttonStyle(.plain)
+                                Button { open(recent, play: true) } label: {
+                                    Image(systemName: "play.fill").foregroundStyle(.white).frame(width: 46, height: 46).background(ReaderStyle.green, in: Circle())
+                                }.accessibilityLabel("Resume \(recent.title)")
+                            }
+                        }.padding(18).background(ReaderStyle.paleGreen, in: RoundedRectangle(cornerRadius: 22))
+                    }
+                    HStack {
+                        Text("My Library").font(.title2.bold())
+                        Spacer()
+                        Menu { Picker("Sort", selection: $sort) { ForEach(["Last Opened", "Date Added", "Title"], id: \.self) { Text($0) } } } label: {
+                            HStack(spacing: 4) { Text(sort); Image(systemName: "chevron.down") }.font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
-                }
-                .frame(maxHeight: 240)
-                .accessibilityLabel("Available voices")
-            }
-
-            Button {
-                engine.refreshVoices()
-            } label: {
-                Label("Refresh voices", systemImage: "arrow.clockwise")
-                    .font(.subheadline.weight(.medium))
-            }
-            .buttonStyle(.borderless)
-            .disabled(engine.playbackState.isActive)
-        }
-    }
-
-    private func voiceRow(_ voice: AVSpeechSynthesisVoice) -> some View {
-        let isSelected = engine.selectedVoiceIdentifier == voice.identifier
-        return Button {
-            engine.selectVoice(voice)
-        } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(voice.name)
-                            .font(.subheadline.weight(.semibold))
-                        Text(voice.language)
-                            .font(.caption.monospaced())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                voice.language.caseInsensitiveCompare("es-MX") == .orderedSame
-                                    ? Color.orange.opacity(0.18)
-                                    : Color.secondary.opacity(0.12)
-                            )
-                            .clipShape(Capsule())
+                    if visible.isEmpty {
+                        ContentUnavailableView(search.isEmpty ? "Your reading starts here" : "No matching documents", systemImage: "books.vertical", description: Text(search.isEmpty ? "Tap + to add a document or text." : "Try another title."))
                     }
-                    Text(voice.identifier)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                    Text("Quality: \(engine.qualityLabel(for: voice))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                isSelected
-                    ? Color.accentColor.opacity(0.10)
-                    : Color(uiColor: .tertiarySystemGroupedBackground)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(engine.playbackState.isActive)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private var textCard: some View {
-        card {
-            sectionTitle("Test text", icon: "text.alignleft")
-
-            Menu {
-                ForEach(SampleText.allCases) { sample in
-                    Button(sample.rawValue) {
-                        engine.load(sample)
+                    LazyVStack(spacing: 12) {
+                        ForEach(visible) { document in
+                            ReaderCard {
+                                HStack(alignment: .top, spacing: 13) {
+                                    Button { open(document) } label: {
+                                        HStack(alignment: .top, spacing: 13) {
+                                            DocumentThumbnail(document: document)
+                                            VStack(alignment: .leading, spacing: 7) {
+                                                Text(document.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                                                Text(document.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                                                ProgressView(value: document.progress)
+                                                Text("\(Int(document.progress * 100))% complete").font(.caption).foregroundStyle(.secondary)
+                                                if let date = document.lastOpenedAt { Text("Opened \(date.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.secondary) }
+                                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                        }
+                                    }.buttonStyle(.plain)
+                                    Menu {
+                                        Button("Rename", systemImage: "pencil") { renameTitle = document.title; renameTarget = document }
+                                        Button("Export Text…", systemImage: "square.and.arrow.up") { exportText(document) }
+                                        Button("Delete", systemImage: "trash", role: .destructive) { deleteTarget = document }
+                                    } label: { Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 28, height: 28) }.accessibilityLabel("Actions for \(document.title)")
+                                }
+                            }
+                        }
                     }
+                }.padding(20).frame(maxWidth: 850).frame(maxWidth: .infinity)
+            }.background(ReaderStyle.background).navigationTitle("Library")
+                .toolbar { ToolbarItem(placement: .topBarTrailing) {
+                    Button { adding = true } label: { Image(systemName: "plus").font(.title3.weight(.medium)).foregroundStyle(.white).frame(width: 38, height: 38).background(ReaderStyle.green, in: Circle()) }.accessibilityLabel("Add to Library").accessibilityIdentifier("addToLibrary")
+                } }
+                .sheet(isPresented: $adding) { AddLibraryView(library: library) }
+                .navigationDestination(isPresented: $showingReader) {
+                    if let document = library.opened, let content = library.content { ReaderView(library: library, document: document, content: content) }
                 }
-            } label: {
-                HStack {
-                    Label(engine.sourceLabel, systemImage: "doc.text")
-                    Spacer()
-                    Image(systemName: "chevron.down")
+                .overlay { if library.isOpening { ProgressView("Opening document…").padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20)) } }
+                .alert("Rename document", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
+                    TextField("Title", text: $renameTitle)
+                    Button("Save") { if let target = renameTarget { library.rename(target, to: renameTitle) }; renameTarget = nil }
+                    Button("Cancel", role: .cancel) { renameTarget = nil }
                 }
-                .font(.subheadline.weight(.medium))
-                .padding(12)
-                .background(Color(uiColor: .tertiarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .disabled(engine.playbackState.isActive)
-
-            TextEditor(text: editableText)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 150, maxHeight: 230)
-                .padding(8)
-                .background(Color(uiColor: .tertiarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .disabled(engine.playbackState.isActive)
-
-            HStack(spacing: 14) {
-                metric("\(engine.wordCount)", label: "words")
-                metric("\(engine.paragraphCount)", label: "paragraphs")
-                metric("\(engine.segments.count)", label: "segments")
-            }
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Current text position")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                Text(highlightedText)
-                    .font(.body)
-                    .lineSpacing(4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.yellow.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityLabel("Text with the current spoken range highlighted when available")
-            }
+                .confirmationDialog("Delete this document and its saved files?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
+                    Button("Delete", role: .destructive) { if let target = deleteTarget { Task { await library.delete(target) } }; deleteTarget = nil }
+                }
+                .fileExporter(isPresented: $exporting, document: export, contentType: .plainText, defaultFilename: exportName) { result in
+                    if case .failure(let error) = result { library.error = error.localizedDescription }
+                }
         }
     }
-
-    private var playbackCard: some View {
-        card {
-            sectionTitle("Playback", icon: "play.circle")
-            Text("Speech rate")
-                .font(.subheadline.weight(.medium))
-            HStack(spacing: 6) {
-                ForEach(SpeechRatePreset.allCases) { preset in
-                    Button {
-                        engine.selectedRate = preset
-                    } label: {
-                        Text(preset.label)
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(
-                                engine.selectedRate == preset
-                                    ? Color.accentColor
-                                    : Color(uiColor: .tertiarySystemGroupedBackground)
-                            )
-                            .foregroundStyle(engine.selectedRate == preset ? Color.white : Color.primary)
-                            .clipShape(RoundedRectangle(cornerRadius: 9))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(engine.playbackState.isActive)
-                }
-            }
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
-                actionButton("Speak / Play", icon: "play.fill", prominent: true, enabled: engine.canStart) {
-                    engine.speak()
-                }
-                actionButton("Pause", icon: "pause.fill", enabled: engine.canPause) {
-                    engine.pause()
-                }
-                actionButton("Resume", icon: "playpause.fill", enabled: engine.canResume) {
-                    engine.resume()
-                }
-                actionButton("Stop", icon: "stop.fill", enabled: engine.canStop) {
-                    engine.stop()
-                }
-            }
-
-            Text("Rate is an approximate multiplier anchored to Apple's default speech rate; it is not a measured words-per-minute value.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    private func open(_ document: LibraryDocument, play: Bool = false) {
+        Task { await library.open(document, play: play); if library.opened?.id == document.id { showingReader = true } }
+    }
+    private func exportText(_ document: LibraryDocument) {
+        Task {
+            do {
+                let content = try await LibraryStorage.shared.load(document.id)
+                export = TextExport(text: content.exportedText)
+                exportName = document.title.replacingOccurrences(of: "/", with: "-")
+                exporting = true
+            } catch { library.error = error.localizedDescription }
         }
     }
+}
 
-    private var diagnosticsCard: some View {
-        card {
-            sectionTitle("Diagnostics", icon: "waveform.path")
-            diagnosticRow("Voice", value: engine.selectedVoice?.name ?? "Unavailable")
-            diagnosticRow("Locale", value: engine.selectedVoice?.language ?? "Unavailable")
-            diagnosticRow("Identifier", value: engine.selectedVoice?.identifier ?? "Unavailable")
-            diagnosticRow("Quality", value: engine.selectedVoice.map(engine.qualityLabel(for:)) ?? "Unavailable")
-            diagnosticRow(
-                "Rate preset / AV rate",
-                value: "\(engine.selectedRate.label) / \(String(format: "%.2f", engine.selectedRate.avSpeechRate))"
-            )
-            diagnosticRow("State", value: engine.playbackState.label)
-            diagnosticRow("Segment", value: engine.currentSegmentLabel)
-            diagnosticRow("Audio session", value: engine.audioSessionSummary)
-            diagnosticRow("Last event", value: engine.latestEvent)
+struct TextExport: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var text: String
+    init(text: String) { self.text = text }
+    init(configuration: ReadConfiguration) throws { text = String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8) ?? "" }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: Data(text.utf8)) }
+}
 
-            if let lastError = engine.lastError {
-                Text(lastError)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.red.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-            }
-
-            if !engine.recentEvents.isEmpty {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Recent events")
-                        .font(.caption.weight(.semibold))
-                    ForEach(Array(engine.recentEvents.enumerated()), id: \.offset) { _, event in
-                        Text(event)
-                            .font(.caption2.monospaced())
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .lineLimit(2)
-                    }
+struct AddTextView: View {
+    let library: LibraryController
+    var onSaved: (() -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var text = ""
+    @State private var saving = false
+    @State private var error: String?
+    var body: some View {
+        Form {
+            TextField("Title", text: $title).accessibilityIdentifier("textTitle")
+            TextEditor(text: $text).frame(minHeight: 300).accessibilityLabel("Text to read").accessibilityIdentifier("textContent")
+            if let error { Text(error).foregroundStyle(.red) }
+        }.navigationTitle("Add Text").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving…" : "Save") {
+                        saving = true
+                        Task {
+                            do {
+                                let content = try await LibraryStorage.shared.createText(text)
+                                try await library.add(title: title, kind: .text, content: content)
+                                dismiss()
+                                onSaved?()
+                            } catch { self.error = error.localizedDescription; saving = false }
+                        }
+                    }.disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("saveText")
                 }
-                .padding(.top, 4)
-            }
-        }
-    }
-
-    private var privacyNote: some View {
-        Text("The app has no network client and sends no text to an app server. Voice availability, quality, and offline behavior are controlled by iOS and the selected system voice.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 3)
-    }
-
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12, content: content)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-    }
-
-    private func sectionTitle(_ title: String, icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(.headline)
-    }
-
-    private func diagnosticRow(_ title: String, value: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(title)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 8)
-            Text(value)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
-        }
-        .font(.footnote)
-    }
-
-    private func metric(_ value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(value).font(.subheadline.monospacedDigit().weight(.semibold))
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private func actionButton(
-        _ title: String,
-        icon: String,
-        prominent: Bool = false,
-        enabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(prominent ? Color.accentColor : Color(uiColor: .tertiarySystemGroupedBackground))
-                .foregroundStyle(prominent ? Color.white : Color.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
+            }.interactiveDismissDisabled(saving)
     }
 }

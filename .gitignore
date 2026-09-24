@@ -18,10 +18,9 @@ build/
 *.dSYM.zip
 *.appex
 
-# Swift Package Manager artifacts (no packages are currently used)
+# Swift Package Manager local artifacts
 .build/
 .swiftpm/
-Package.resolved
 
 # macOS
 .DS_Store
