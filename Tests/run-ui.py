@@ -2,8 +2,10 @@
 """XCTest UI host generated in a temporary copy. Never adds schemes/targets to the app project.
 Usage: python3 Tests/run-ui.py SIMULATOR_UDID [DERIVED_DATA]
 """
-import pathlib, shutil, subprocess, sys, tempfile, plistlib, platform, os, sqlite3
+import pathlib, shutil, subprocess, sys, tempfile, plistlib, platform, os, sqlite3, zipfile
 root = pathlib.Path(__file__).resolve().parents[1]
+# Default smoke flow; other system-picker flows are selected explicitly.
+os.environ.setdefault('READER_UI_TEST', 'testTextReaderAndSettings')
 derived = sys.argv[2] if len(sys.argv)>2 else '/private/tmp/NativeReaderUIBuild'
 # A stable temporary source path permits incremental builds across UI checks.
 work = pathlib.Path(derived) / 'ValidationSource'
@@ -48,7 +50,26 @@ if fixtures:
     for name in ['embedded.pdf','mixed.pdf','chapters.epub','no-toc.epub','corrupt.pdf','ocr.png']:
         source = fixtures[-1]/name
         if source.exists(): shutil.copyfile(source,target/name)
-    subprocess.run(['xcrun','simctl','addmedia',sys.argv[1],str(fixtures[-1]/'ocr.png')],check=True)
+    # Give the no-TOC fixture a distinct title so Library assertions are unambiguous.
+    no_toc = target/'no-toc.epub'
+    with zipfile.ZipFile(no_toc) as archive:
+        entries = [(item, archive.read(item.filename)) for item in archive.infolist()]
+    with zipfile.ZipFile(no_toc, 'w') as archive:
+        for item, data in entries:
+            if item.filename.endswith('.opf'): data = data.replace(b'Fixture EPUB', b'No TOC Fixture')
+            archive.writestr(item, data)
+    with zipfile.ZipFile(target/'chapters.epub') as archive:
+        entries = [(item, archive.read(item.filename)) for item in archive.infolist()]
+    with zipfile.ZipFile(target/'selection.epub', 'w') as archive:
+        for item, data in entries:
+            if item.filename.endswith('.opf'): data = data.replace(b'Fixture EPUB', b'All Chapters Fixture')
+            archive.writestr(item, data)
+    if os.environ.get('READER_UI_TEST') in ('testCancellation', 'testPhotoImport'):
+        subprocess.run(['xcrun', 'swift', str(root/'Tests/MakeUIFixtures.swift'), str(target)], check=True)
+    if os.environ.get('READER_UI_TEST') == 'testPhotoImport':
+        for name in ['photo-first.png', 'photo-second.png']:
+            subprocess.run(['xcrun','simctl','addmedia',sys.argv[1],str(target/name)],check=True)
+
 def library_snapshot():
     support = container / 'Library/Application Support'
     if not (support/'default.store').exists(): return [], []
@@ -59,10 +80,12 @@ def library_snapshot():
     return rows, folders
 
 actions = os.environ.get('READER_UI_TEST') == 'testDocumentActions'
-before = library_snapshot() if actions else None
+cancellation = os.environ.get('READER_UI_TEST') == 'testCancellation'
+before = library_snapshot() if actions or cancellation else None
+staged_before = {p.name for p in (container/'tmp').glob('ReaderImport-*')}
 exports_before = {p.name for p in (container/'Documents').glob('*.txt')}
 if os.environ.get('READER_UI_TEST'):
-    command += ['-only-testing:ReaderUITests/ReaderUITests/'+os.environ['READER_UI_TEST']]
+    command += ['-only-testing:ReaderUITests/ReaderUITests/'+name for name in os.environ['READER_UI_TEST'].split(',')]
 subprocess.run(command + ['test-without-building'], check=True)
 
 if actions:
@@ -87,3 +110,26 @@ if os.environ.get('READER_UI_TEST') in ('testPDFImport', 'testEPUBImport'):
     else:
         assert 'FIRST' in text and 'THIRD' in text and 'SECOND' not in text
     print('PASS: actual export contains selected original pages/chapters only', flush=True)
+
+if cancellation:
+    container = pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',sys.argv[1],'com.karloss.NativeTTSBenchmark','data'], text=True).strip())
+    assert library_snapshot() == before, 'Cancelled import altered library metadata/files'
+    assert {p.name for p in (container/'tmp').glob('ReaderImport-*')} == staged_before, 'Cancelled import left new staged files'
+    print('PASS: cancellation leaves library unchanged and no staged import files', flush=True)
+
+if os.environ.get('READER_UI_TEST') == 'testPhotoImport':
+    container = pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',sys.argv[1],'com.karloss.NativeTTSBenchmark','data'], text=True).strip())
+    files = list((container/'Documents').rglob('Photos*.txt'))
+    assert files, 'No actual photo text export found'
+    text = max(files, key=lambda p:p.stat().st_mtime).read_text()
+    assert '[Page 1]' in text and '[Page 2]' in text
+    assert text.index('FIRST PHOTO') < text.index('[Page 2]') < text.index('SECOND PHOTO'), text
+    print('PASS: two distinct PhotosPicker selections retain their requested order through OCR, Reader and export', flush=True)
+
+if os.environ.get('READER_UI_TEST') == 'testEPUBSelectAll':
+    container = pathlib.Path(subprocess.check_output(['xcrun','simctl','get_app_container',sys.argv[1],'com.karloss.NativeTTSBenchmark','data'], text=True).strip())
+    files = list((container/'Documents').rglob('All Chapters Fixture*.txt'))
+    assert files, 'No selected-chapter export found'
+    text = max(files, key=lambda p:p.stat().st_mtime).read_text()
+    assert 'SECOND' in text and 'FIRST' not in text and 'THIRD' not in text, text
+    print('PASS: All chapters toggle and individual selection export only chapter Two', flush=True)

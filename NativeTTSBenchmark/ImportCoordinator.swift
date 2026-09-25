@@ -130,8 +130,10 @@ import VisionKit
         stagedURL = nil
     }
     func finishError(_ failure: Error) async {
+        // Vision may report its own cancellation error instead of Swift CancellationError.
+        let wasCancelled = cancelling || Task.isCancelled || failure is CancellationError
         await cleanup()
-        if !(failure is CancellationError) { error = failure.localizedDescription }
+        if !wasCancelled { error = failure.localizedDescription }
         else { completed = true }
         processing = false; preparing = false; cancelling = false
     }

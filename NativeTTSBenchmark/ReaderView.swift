@@ -5,6 +5,7 @@ struct ReaderView: View {
     let document: LibraryDocument
     let content: ReadingDocument
     @ScaledMetric(relativeTo: .body) private var typeScale = 1.0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var typography = false
     @State private var navigation = false
     @State private var dragging = false
@@ -90,7 +91,7 @@ struct ReaderView: View {
                 if editing { draggedProgress = speech.progress; dragging = true }
                 else { dragging = false; speech.seek(progress: draggedProgress) }
             }.accessibilityLabel("Document position").accessibilityValue("\(Int(speech.progress * 100)) percent")
-            HStack { Text("\(Int((dragging ? draggedProgress : speech.progress) * 100))% complete"); Spacer(); Text(speech.positionLabel) }.font(.caption).foregroundStyle(.secondary)
+            (dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())) { Text("\(Int((dragging ? draggedProgress : speech.progress) * 100))% complete"); if !dynamicTypeSize.isAccessibilitySize { Spacer() }; Text(speech.positionLabel) }.font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
                 navigationButton("Previous paragraph", "backward.end.alt") { speech.paragraph(-1) }
                 navigationButton("Previous sentence", "backward.end.fill") { speech.sentence(-1) }
@@ -111,8 +112,12 @@ struct ReaderView: View {
     }
     private func navigationButton(_ label: String, _ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 5) { Image(systemName: symbol).font(.title3); Text(label).font(.caption2).multilineTextAlignment(.center).lineLimit(2) }.frame(maxWidth: .infinity, minHeight: 54)
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(dynamicTypeSize.isAccessibilitySize ? .system(size: 24) : .title3)
+                if !dynamicTypeSize.isAccessibilitySize { Text(label).font(.caption2).multilineTextAlignment(.center).lineLimit(2) }
+            }.frame(maxWidth: .infinity, minHeight: 54)
         }.foregroundStyle(.primary).accessibilityLabel(label)
+            .accessibilityShowsLargeContentViewer { Label(label, systemImage: symbol) }
     }
 }
 

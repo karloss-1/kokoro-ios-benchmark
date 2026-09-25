@@ -59,6 +59,8 @@ Core extraction and speech use local files and Apple frameworks. Files/Photos ma
 
 See **IMPLEMENTATION_STATUS.md** for the current build, passing checks, known failures and device-only work. Simulator results do not establish iPhone/iPad audio or memory behavior.
 
+The Simulator implementation/QA phase is closed for physical-device evaluation (2026-09-25). Final clean build passed in Xcode 27; essential smoke coverage reuses the recent passing tests listed in the status file. iPad Files/EPUB automation remains incomplete because of accessibility lookup failures; no production defect was established by that test. No essential-flow blocker is currently known.
+
 Build without signing:
 
 ```sh
@@ -73,22 +75,26 @@ With a booted simulator, the core integration harness compiles the real producti
 python3 Tests/run-integration.py /tmp/NativeReaderBuild SIMULATOR_UDID
 ```
 
-UI checks use XCTest in a temporary copy of the project, leaving the application's schemes and targets unchanged:
+UI checks use XCTest in a temporary copy of the project, leaving the application's schemes and targets unchanged. The default is the text/Reader/Settings smoke flow:
 
 ```sh
 python3 Tests/run-ui.py SIMULATOR_UDID
 ```
 
+Select another focused flow with `READER_UI_TEST`, for example `READER_UI_TEST=testEPUBSelectAll python3 Tests/run-ui.py SIMULATOR_UDID`. Comma-separated test names are supported. Actual exported-file checks run for the corresponding single selected flow. `testPhotoImport` expects a fresh validation simulator where the two staged images are the newest images; avoid repeating media staging into a personal/long-lived photo library.
+
+At accessibility text sizes, Library uses vertical cards and Reader shows navigation icons with full accessibility labels. Long-press a navigation icon for Apple's enlarged label viewer. Text retains the system's requested size and scrolls.
+
 The optional third argument to the core runner seeds a **simulator-only** app data container for inspection. Never pass a real-device or personal library path. Tests retain fixture artifacts and XCTest results in temporary directories for diagnosis.
 
 ## First physical-device pass
 
-1. Select an installed Spanish voice in Settings and set 1×. Add a short academic text; verify audible pronunciation, Play/Pause, sentence/paragraph jumps and slider seeking.
+1. Install using the instructions above and verify the first Library launch. Select an installed Spanish voice in Settings and set 1×; compare Enhanced voices if exposed by the device. Add a short academic text; verify audible pronunciation, Play/Pause, sentence/paragraph jumps, highlighting, auto-scroll and semantic slider seeking.
 2. Leave at a known sentence, relaunch, and confirm the position. Test another voice/rate and Dark/System appearance.
 3. Import a digital PDF, a scanned PDF and a mixed PDF. Try a page range; compare the displayed/exported text with the original pages.
 4. Select multiple photos in a known order; scan two pages; inspect OCR and page markers. Cancel a longer import and confirm no partial library entry remains.
 5. Import an EPUB with selected noncontiguous chapters and one without a TOC. Check chapter boundaries and export.
-6. During longer speech, lock/unlock, switch apps, use Control Center play/pause and previous/next, disconnect headphones and test an interruption. Record behavior without assuming background success.
+6. During longer speech, lock/unlock, switch apps, inspect Lock Screen and Control Center / Now Playing, and try their available play/pause/previous/next commands plus headphone remote controls. Disconnect headphones and test an interruption. Record behavior without assuming background success.
 7. Repeat local-document reading/OCR/speech in airplane mode and test representative large books.
 
 Report device/OS, voice name/locale/quality, document type and size/page count, exact failing action, whether relaunch restores position, screenshots of extraction/UI issues and relevant Xcode logs.

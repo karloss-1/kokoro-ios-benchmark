@@ -20,6 +20,10 @@ struct ContentView: View {
 }
 
 struct LibraryView: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private var adaptiveRow: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 14)) : AnyLayout(HStackLayout(alignment: .top, spacing: 14))
+    }
     @Bindable var library: LibraryController
     @State private var search = ""
     @State private var sort = "Last Opened"
@@ -54,9 +58,9 @@ struct LibraryView: View {
                     if search.isEmpty, let recent {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("CONTINUE LISTENING").font(.caption.weight(.semibold)).tracking(0.7).foregroundStyle(ReaderStyle.green)
-                            HStack(spacing: 14) {
+                            adaptiveRow {
                                 Button { open(recent) } label: {
-                                    HStack(spacing: 14) {
+                                    adaptiveRow {
                                         DocumentThumbnail(document: recent)
                                         VStack(alignment: .leading, spacing: 7) {
                                             Text(recent.title).font(.headline).foregroundStyle(.primary)
@@ -72,7 +76,7 @@ struct LibraryView: View {
                             }
                         }.padding(18).background(ReaderStyle.paleGreen, in: RoundedRectangle(cornerRadius: 22))
                     }
-                    HStack {
+                    adaptiveRow {
                         Text("My Library").font(.title2.bold())
                         Spacer()
                         Menu { Picker("Sort", selection: $sort) { ForEach(["Last Opened", "Date Added", "Title"], id: \.self) { Text($0) } } } label: {
@@ -85,12 +89,12 @@ struct LibraryView: View {
                     LazyVStack(spacing: 12) {
                         ForEach(visible) { document in
                             ReaderCard {
-                                HStack(alignment: .top, spacing: 13) {
+                                adaptiveRow {
                                     Button { open(document) } label: {
-                                        HStack(alignment: .top, spacing: 13) {
+                                        adaptiveRow {
                                             DocumentThumbnail(document: document)
                                             VStack(alignment: .leading, spacing: 7) {
-                                                Text(document.title).font(.headline).foregroundStyle(.primary).lineLimit(2)
+                                                Text(document.title).font(.headline).foregroundStyle(.primary).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                                 Text(document.subtitle).font(.subheadline).foregroundStyle(.secondary)
                                                 ProgressView(value: document.progress)
                                                 Text("\(Int(document.progress * 100))% complete").font(.caption).foregroundStyle(.secondary)

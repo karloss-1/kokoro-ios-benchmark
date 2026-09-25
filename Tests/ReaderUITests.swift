@@ -8,9 +8,14 @@ import XCTest
     func chooseFixture(_ app: XCUIApplication, kind: String, stem: String) {
         app.buttons["addToLibrary"].tap()
         app.buttons.containing(.staticText, identifier: "Import " + kind).firstMatch.tap()
-        XCTAssertTrue(app.buttons["Browse"].waitForExistence(timeout: 10))
-        app.buttons["Browse"].tap()
-        if app.staticTexts["On My iPhone"].waitForExistence(timeout: 2) { app.staticTexts["On My iPhone"].firstMatch.tap() }
+        let localFiles = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad"])).firstMatch
+        let browserReady = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["On My iPhone", "On My iPad", "Browse"])).firstMatch
+        XCTAssertTrue(browserReady.waitForExistence(timeout: 15))
+        if !localFiles.exists {
+            XCTAssertTrue(app.buttons["Browse"].waitForExistence(timeout: 10))
+            app.buttons["Browse"].tap()
+        }
+        if localFiles.waitForExistence(timeout: 2) { localFiles.tap() }
         if app.staticTexts["Document Reader"].waitForExistence(timeout: 2) { app.staticTexts["Document Reader"].firstMatch.tap() }
         let folder = app.cells["Validation fixtures, Folder"]
         if folder.waitForExistence(timeout: 3) { folder.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap() }
@@ -85,6 +90,149 @@ import XCTest
         app.buttons["DOCPicker.actionButton"].tap()
         XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
     }
+    func testNoTOCAndImportError() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        chooseFixture(app, kind: "EPUB", stem: "no-toc")
+        XCTAssertTrue(app.staticTexts["No usable table of contents. Showing sections in reading order."].waitForExistence(timeout: 15))
+        snapshot("EPUB without TOC")
+        app.buttons["Import"].tap()
+        search(app, for: "No TOC Fixture")
+        app.staticTexts["No TOC Fixture"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 5))
+        app.buttons["Document navigation"].tap()
+        XCTAssertTrue(app.buttons["Section 2"].waitForExistence(timeout: 3))
+        app.buttons["Section 2"].tap()
+        snapshot("EPUB no TOC Reader")
+        app.navigationBars.buttons["Library"].tap()
+        chooseFixture(app, kind: "PDF", stem: "corrupt")
+        XCTAssertTrue(app.alerts["Import could not finish"].waitForExistence(timeout: 10))
+        snapshot("Corrupt PDF error")
+        app.alerts.buttons["OK"].tap()
+        XCTAssertTrue(app.buttons.containing(.staticText, identifier: "Add text").firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Close"].tap()
+        search(app, for: "corrupt")
+        XCTAssertFalse(app.staticTexts["corrupt"].exists)
+    }
+    func testEPUBSelectAll() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        chooseFixture(app, kind: "EPUB", stem: "selection")
+        XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 15))
+        let all = app.buttons["All chapters"]
+        XCTAssertTrue(all.isSelected)
+        for name in ["One", "Two", "Three"] { XCTAssertTrue(app.buttons[name].isSelected) }
+        all.tap()
+        XCTAssertFalse(all.isSelected)
+        for name in ["One", "Two", "Three"] { XCTAssertFalse(app.buttons[name].isSelected) }
+        XCTAssertFalse(app.buttons["Import"].isEnabled)
+        app.buttons["One"].tap()
+        XCTAssertTrue(app.buttons["One"].isSelected)
+        XCTAssertFalse(all.isSelected)
+        XCTAssertTrue(app.buttons["Import"].isEnabled)
+        all.tap()
+        XCTAssertTrue(all.isSelected)
+        for name in ["One", "Two", "Three"] { XCTAssertTrue(app.buttons[name].isSelected) }
+        app.buttons["One"].tap(); app.buttons["Three"].tap()
+        XCTAssertFalse(all.isSelected)
+        XCTAssertTrue(app.buttons["Two"].isSelected)
+        XCTAssertTrue(app.buttons["Import"].isEnabled)
+        snapshot("Only chapter Two selected")
+        app.buttons["Import"].tap()
+        search(app, for: "All Chapters Fixture")
+        app.staticTexts["All Chapters Fixture"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "SECOND chapter")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+    }
+
+    func testCancellation() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        chooseFixture(app, kind: "PDF", stem: "cancel")
+        XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 10))
+        app.buttons["Import"].tap()
+        XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 5))
+        snapshot("Processing before Cancel")
+        app.buttons["Cancel"].tap()
+        search(app, for: "cancel")
+        XCTAssertFalse(app.staticTexts["cancel"].exists)
+        app.terminate(); app.launch()
+        search(app, for: "cancel")
+        XCTAssertFalse(app.staticTexts["cancel"].exists)
+    }
+    func testMixedPDFAllPages() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        chooseFixture(app, kind: "PDF", stem: "mixed")
+        XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.textFields["1"].isEnabled)
+        app.buttons["Import"].tap()
+        search(app, for: "mixed")
+        app.staticTexts["mixed"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 5))
+        app.buttons["Document navigation"].tap()
+        XCTAssertTrue(app.buttons["Page 2"].waitForExistence(timeout: 5))
+        app.buttons["Page 2"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Page 2 of 2")).firstMatch.waitForExistence(timeout: 3))
+        snapshot("Mixed PDF OCR Reader")
+        app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+    }
+    func testPhotoImport() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        app.buttons["addToLibrary"].tap()
+        app.buttons.containing(.staticText, identifier: "Choose photos").firstMatch.tap()
+        let images = app.images.matching(identifier: "PXGGridLayout-Info")
+        XCTAssertTrue(images.element(boundBy: 1).waitForExistence(timeout: 30))
+        snapshot("Photos picker before selection")
+        // Fresh validation simulator: newest fixtures are SECOND then FIRST in the grid.
+        images.element(boundBy: 1).tap()
+        images.element(boundBy: 0).tap()
+        snapshot("Photos ordered selection")
+        app.buttons["Done"].tap()
+        search(app, for: "Photos ·")
+        let title = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Photos ·")).firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10)); title.tap()
+        XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 10))
+        snapshot("Photos Reader")
+        app.buttons["Document navigation"].tap()
+        XCTAssertTrue(app.buttons["Page 2"].waitForExistence(timeout: 5)); app.buttons["Page 2"].tap()
+        app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+    }
+    func testLargeTextLayout() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 10))
+        snapshot("Library largest Dynamic Type")
+        let document = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "% complete")).firstMatch
+        XCTAssertTrue(document.waitForExistence(timeout: 5)); document.tap()
+        XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["readerPlayPause"].isHittable)
+        XCTAssertTrue(app.buttons["Next sentence"].isHittable)
+        app.buttons["Next sentence"].tap()
+        app.buttons["Previous sentence"].tap()
+        snapshot("Reader largest Dynamic Type")
+        app.navigationBars.buttons["Library"].tap()
+        app.buttons["Settings"].firstMatch.tap()
+        snapshot("Settings largest Dynamic Type")
+    }
     func testTextReaderAndSettings() throws {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
@@ -126,7 +274,7 @@ import XCTest
         app.navigationBars.buttons["Library"].tap()
         app.textFields["librarySearch"].tap()
         app.textFields["librarySearch"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: title.count))
-        app.tabBars.buttons["Settings"].tap()
+        app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Highlight text while reading"].waitForExistence(timeout: 5))
         snapshot("Settings")
         app.buttons["Dark"].tap(); snapshot("Settings Dark")
@@ -135,7 +283,7 @@ import XCTest
         XCTAssertTrue(app.segmentedControls.buttons["Spanish"].waitForExistence(timeout: 5))
         app.segmentedControls.buttons["All"].tap(); snapshot("Voices")
         app.navigationBars.buttons["Settings"].tap()
-        app.tabBars.buttons["Library"].tap()
+        app.buttons["Library"].firstMatch.tap()
     }
     func testDocumentActions() throws {
         continueAfterFailure = false

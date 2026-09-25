@@ -166,7 +166,7 @@ struct EPUBOptionsView: View {
                 ReaderCard {
                     Button {
                         selected = allSelected ? [] : Set(preview.chapters.map(\.id))
-                    } label: { HStack { Label("All chapters", systemImage: "book").font(.headline); Spacer(); Image(systemName: allSelected ? "checkmark.circle.fill" : "circle") } }.buttonStyle(.plain)
+                    } label: { HStack { Label("All chapters", systemImage: "book").font(.headline); Spacer(); Image(systemName: allSelected ? "checkmark.circle.fill" : "circle") }.frame(minHeight: 44).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityAddTraits(allSelected ? .isSelected : [])
                 }
                 ForEach(preview.chapters) { chapter in
                     Button {
