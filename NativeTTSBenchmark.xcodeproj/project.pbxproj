@@ -6,6 +6,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F00100000000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000002 /* Assets.xcassets */; };
 		000000000000000000000020 /* NativeTTSBenchmarkApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000010 /* NativeTTSBenchmarkApp.swift */; };
 		000000000000000000000021 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000011 /* ContentView.swift */; };
 		000000000000000000000022 /* SpeechEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000012 /* SpeechEngine.swift */; };
@@ -28,6 +29,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		F00100000000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		000000000000000000000010 /* NativeTTSBenchmarkApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTTSBenchmarkApp.swift; sourceTree = "<group>"; };
 		000000000000000000000011 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		000000000000000000000012 /* SpeechEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechEngine.swift; sourceTree = "<group>"; };
@@ -71,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				000000000000000000000010 /* NativeTTSBenchmarkApp.swift */,
+				F00100000000000000000002 /* Assets.xcassets */,
 				8681B993BC59B394A6D3FFA9 /* SystemMedia.swift */,
 				F370344D1C02040280C32269 /* EPUBService.swift */,
 				FF40A51BA8B59830DECE60A3 /* DocumentScanner.swift */,
@@ -151,7 +154,7 @@
 		000000000000000000000032 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = ();
+			files = (F00100000000000000000001 /* Assets.xcassets in Resources */,);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
@@ -217,6 +220,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NativeTTSBenchmark/Info.plist;
@@ -240,6 +244,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = NativeTTSBenchmark/Info.plist;
