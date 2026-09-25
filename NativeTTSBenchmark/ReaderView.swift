@@ -4,6 +4,7 @@ struct ReaderView: View {
     let library: LibraryController
     let document: LibraryDocument
     let content: ReadingDocument
+    @ScaledMetric(relativeTo: .body) private var typeScale = 1.0
     @State private var typography = false
     @State private var navigation = false
     @State private var dragging = false
@@ -25,11 +26,11 @@ struct ReaderView: View {
                         Text(speech.positionLabel).font(.subheadline).foregroundStyle(.secondary)
                     }.padding(.bottom, 12)
                     ForEach(Array(content.sections.enumerated()), id: \.element.id) { sectionIndex, section in
-                        if let title = section.title { Text(title).font(.system(size: library.settings.fontSize + 5, weight: .bold, design: .serif)) }
+                        if let title = section.title { Text(title).font(.system(size: (library.settings.fontSize + 5) * typeScale, weight: .bold, design: .serif)) }
                         if let page = section.pageNumber { Text("Page \(page)").font(.caption).foregroundStyle(.secondary) }
                         if section.paragraphs.isEmpty { Text("No text on this page.").font(.caption).foregroundStyle(.secondary) }
                         ForEach(Array(section.paragraphs.enumerated()), id: \.element.id) { paragraphIndex, paragraph in
-                            ReaderParagraphView(paragraph: paragraph, units: grouped["\(sectionIndex):\(paragraphIndex)"] ?? [], activeIndex: library.settings.highlight ? speech.index : nil, fontSize: library.settings.fontSize)
+                            ReaderParagraphView(paragraph: paragraph, units: grouped["\(sectionIndex):\(paragraphIndex)"] ?? [], activeIndex: library.settings.highlight ? speech.index : nil, fontSize: library.settings.fontSize * typeScale)
                                 .id(paragraph.id)
                         }
                     }
@@ -50,6 +51,7 @@ struct ReaderView: View {
             }
         }
         .safeAreaInset(edge: .bottom) { playbackBar }
+        .toolbar(.hidden, for: .tabBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -109,7 +111,7 @@ struct ReaderView: View {
     }
     private func navigationButton(_ label: String, _ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 5) { Image(systemName: symbol).font(.title3); Text(label).font(.system(size: 10)).multilineTextAlignment(.center).lineLimit(2) }.frame(maxWidth: .infinity, minHeight: 54)
+            VStack(spacing: 5) { Image(systemName: symbol).font(.title3); Text(label).font(.caption2).multilineTextAlignment(.center).lineLimit(2) }.frame(maxWidth: .infinity, minHeight: 54)
         }.foregroundStyle(.primary).accessibilityLabel(label)
     }
 }

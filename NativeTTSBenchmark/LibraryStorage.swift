@@ -14,6 +14,8 @@ actor LibraryStorage {
         let destination = folder(id)
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
         do {
+            // Set the directory protection before creating files so they inherit it.
+            try fm.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
             try Task.checkCancellation()
             var sourceName: String?
             if let source {
@@ -24,8 +26,6 @@ actor LibraryStorage {
             try Task.checkCancellation()
             try JSONEncoder().encode(content).write(to: file(id, "content.json"), options: .atomic)
             if let thumbnail { try thumbnail.write(to: file(id, "cover.jpg"), options: .atomic) }
-            // Reading must remain available when the phone locks after first unlock.
-            try fm.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: destination.path)
             try Task.checkCancellation()
             return (sourceName, thumbnail == nil ? nil : "cover.jpg")
         } catch {

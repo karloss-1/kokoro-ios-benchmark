@@ -50,6 +50,11 @@ import PDFKit
         speech.speechSynthesizer(AVSpeechSynthesizer(), didFinish: AVSpeechUtterance(string: "obsolete"))
         await Task.yield()
         try check(speech.index == 0, "obsolete utterance callback does not advance playback")
+        speech.load(id: id, title: "Finished", content: content, position: 3, completed: true)
+        speech.stop()
+        try check(speech.progress == 1, "Stop preserves completed document progress")
+        speech.configure(voiceID: "", rate: 1.25)
+        try check(speech.progress == 1, "rate changes preserve completed document progress")
         let suite = "ReaderChecks-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let settings = ReaderSettings(defaults: defaults)
@@ -72,6 +77,9 @@ import PDFKit
         try check(pdf.sections.map(\.pageNumber) == [2, 3] && pdf.originalPageCount == 3, "selected PDF page numbers remain original")
         try check(pdf.exportedText.contains("[Page 2]") && !pdf.exportedText.contains("Embedded page 1"), "PDF export preserves only selected pages")
         do { _ = try await extractor.pdf(pdfURL, pages: 1...9, progress: { _ in }); throw ReaderError.message("Invalid PDF range accepted") } catch ReaderError.invalidRange { print("PASS: invalid page range rejected") }
+        let corruptPDF = work.appending(path: "corrupt.pdf")
+        try Data("not a PDF".utf8).write(to: corruptPDF)
+        do { _ = try await extractor.inspectPDF(corruptPDF); throw ReaderError.message("Corrupt PDF accepted") } catch ReaderError.invalidPDF { print("PASS: corrupt PDF rejected") }
         let cancelled = Task { try await extractor.pdf(pdfURL, pages: 1...3, progress: { _ in }) }
         cancelled.cancel()
         do { _ = try await cancelled.value; throw ReaderError.message("Cancelled PDF completed") } catch is CancellationError { print("PASS: PDF cancellation propagates") }
@@ -85,7 +93,7 @@ import PDFKit
         try check(all.exportedText.contains("FIRST") && all.exportedText.contains("SECOND") && all.exportedText.contains("THIRD"), "all EPUB chapters extracted")
         let missingTOC = try await epubService.inspect(work.appending(path: "no-toc.epub"))
         try check(missingTOC.note != nil && missingTOC.chapters.count == 2, "missing EPUB TOC uses explicitly labeled reading order")
-        // OCR is exercised, but a simulator runtime may not include the recognition model.
+        // OCR and mixed PDF are required checks: any failure must fail this executable.
         let image = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900)).image { context in
             UIColor.white.setFill(); context.fill(CGRect(x: 0, y: 0, width: 1200, height: 900))
             ("La fisioterapia estudia el movimiento.\nEl sistema muscular sostiene el cuerpo." as NSString).draw(in: CGRect(x: 80, y: 150, width: 1000, height: 500), withAttributes: [.font: UIFont.systemFont(ofSize: 48), .foregroundColor: UIColor.black])
@@ -96,17 +104,31 @@ import PDFKit
             let (ocr, _) = try await extractor.images([imageURL], progress: { _ in })
             try check(ocr.exportedText.localizedCaseInsensitiveContains("fisioterapia"), "Vision document OCR on real image fixture")
             let mixedURL = work.appending(path: "mixed.pdf")
-            try renderer.pdfData { context in
+            // A renderer reused after pdfData produced an empty second PDF on SDK 27.
+            let mixedRenderer = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 612, height: 792))
+            let mixedData = mixedRenderer.pdfData { context in
                 context.beginPage()
                 ("Embedded layer about anatomy and movement." as NSString).draw(at: CGPoint(x: 40, y: 40), withAttributes: [.font: UIFont.systemFont(ofSize: 20)])
                 context.beginPage(); image.draw(in: CGRect(x: 0, y: 0, width: 612, height: 459))
-            }.write(to: mixedURL)
+            }
+            try check(!mixedData.isEmpty && PDFDocument(data: mixedData)?.pageCount == 2, "mixed fixture contains two valid PDF pages")
+            try check(PDFDocument(data: mixedData)?.page(at: 1)?.string?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false, "mixed fixture second page has no embedded text")
+            try mixedData.write(to: mixedURL)
             let mixed = try await extractor.pdf(mixedURL, pages: 1...2, progress: { _ in })
             try check(mixed.exportedText.contains("Embedded layer") && mixed.exportedText.localizedCaseInsensitiveContains("fisioterapia"), "mixed PDF uses text layer plus OCR")
-        } catch {
-            print("OCR SIMULATOR LIMITATION OR FAILURE (requires investigation/device test): \(error)")
-            try String(describing: error).write(to: work.appending(path: "ocr-result.txt"), atomically: true, encoding: .utf8)
         }
+        let corruptImage = work.appending(path: "corrupt.png")
+        try Data("not an image".utf8).write(to: corruptImage)
+        do { _ = try await extractor.images([corruptImage], progress: { _ in }); throw ReaderError.message("Corrupt image accepted") } catch ReaderError.unsupportedImage { print("PASS: corrupt image rejected") }
+        let corruptEPUB = work.appending(path: "corrupt.epub")
+        try Data("not an EPUB".utf8).write(to: corruptEPUB)
+        var rejectedEPUB = false
+        do { _ = try await epubService.inspect(corruptEPUB) } catch { rejectedEPUB = true }
+        try check(rejectedEPUB, "corrupt EPUB rejected")
+        let noTOCContent = try await epubService.extract(missingTOC, selected: Set(missingTOC.chapters.map(\.id)), progress: { _ in })
+        try check(noTOCContent.exportedText.contains("FIRST") && noTOCContent.exportedText.contains("THIRD"), "EPUB without TOC exports reading-order content")
+        let imagePages = try await extractor.images([imageURL, imageURL], progress: { _ in }).0
+        try check(imagePages.sections.map(\.pageNumber) == [1, 2] && imagePages.exportedText.contains("[Page 2]"), "multiple image pages preserve ordering and page markers")
         try await files.remove(id)
         do { _ = try await files.load(id); throw ReaderError.message("Deleted file remains") } catch ReaderError.missingFile { print("PASS: deletion removes managed content") }
         if CommandLine.arguments.count > 2 {

@@ -88,7 +88,7 @@ struct PDFOptionsView: View {
                 Button { all = true } label: { option("All pages", "Import all \(preview.pageCount) pages", selected: all, symbol: "doc.text") }.buttonStyle(.plain)
                 ReaderCard {
                     VStack(alignment: .leading, spacing: 20) {
-                        Button { all = false } label: { HStack { Label("Page range", systemImage: "document").font(.headline); Spacer(); Image(systemName: !all ? "largecircle.fill.circle" : "circle").foregroundStyle(ReaderStyle.green) } }.buttonStyle(.plain)
+                        Button { all = false } label: { HStack { Label("Page range", systemImage: "document").font(.headline); Spacer(); Image(systemName: !all ? "largecircle.fill.circle" : "circle").foregroundStyle(ReaderStyle.green) }.frame(minHeight: 44).contentShape(Rectangle()) }.buttonStyle(.plain)
                         HStack {
                             VStack(alignment: .leading) { Text("From").foregroundStyle(.secondary); TextField("1", text: $from).keyboardType(.numberPad).textFieldStyle(.roundedBorder) }
                             VStack(alignment: .leading) { Text("To").foregroundStyle(.secondary); TextField("\(preview.pageCount)", text: $to).keyboardType(.numberPad).textFieldStyle(.roundedBorder) }
@@ -123,7 +123,8 @@ struct SourcePreview: View {
 struct ProcessingView: View {
     @Bindable var coordinator: ImportCoordinator
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 24) {
             Text("Extracting text so you can read and listen.").foregroundStyle(.secondary)
             ReaderCard {
                 VStack(alignment: .leading, spacing: 24) {
@@ -141,9 +142,12 @@ struct ProcessingView: View {
                     Text(coordinator.cancelling ? "Cancelling after the current operation…" : coordinator.progress.detail).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
-            Spacer()
+          }.padding(20).frame(maxWidth: 720).frame(maxWidth: .infinity)
+        }.background(ReaderStyle.background)
+        .safeAreaInset(edge: .bottom) {
             Button(coordinator.cancelling ? "Cancelling…" : "Cancel") { coordinator.cancel() }.font(.headline).frame(maxWidth: .infinity).padding(18).background(ReaderStyle.paleGreen, in: Capsule()).disabled(coordinator.cancelling)
-        }.padding(20).frame(maxWidth: 720).frame(maxWidth: .infinity).background(ReaderStyle.background)
+                .padding(20).background(.regularMaterial)
+        }
     }
 }
 

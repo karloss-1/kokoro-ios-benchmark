@@ -79,6 +79,7 @@ actor DocumentExtractor {
             let text = try await recognize(image)
             try Task.checkCancellation()
             sections.append(DocumentNormalizer.section(text: text, page: index + 1))
+            await progress(.init(stage: "Extracting text", detail: "Processed page \(index + 1) of \(urls.count)", completed: index + 1, total: urls.count))
         }
         return (try DocumentNormalizer.document(sections: sections, originalPageCount: urls.count), cover)
     }

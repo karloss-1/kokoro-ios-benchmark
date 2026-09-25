@@ -25,7 +25,7 @@ for bundle in products.glob('*.bundle'): shutil.copytree(bundle, app / bundle.na
 files = ['DocumentModel','LibraryStorage','DocumentExtractor','EPUBService','SpeechEngine','SpeechTypes','ReaderSettings']
 sdk = subprocess.check_output(['xcrun','--sdk','iphonesimulator','--show-sdk-path'], text=True).strip()
 arch = os.uname().machine
-cmd = ['xcrun','swiftc','-swift-version','6','-parse-as-library','-module-name','NativeTTSBenchmark','-sdk',sdk,'-target',f'{arch}-apple-ios26.0-simulator','-I',str(products),'-F',str(products / 'PackageFrameworks'),'-module-cache-path',str(work / 'modules'),'-Xcc',f'-fmodule-map-file={derived}/Build/Intermediates.noindex/GeneratedModuleMaps-iphonesimulator/Minizip.modulemap','-Xcc',f'-I{derived}/SourcePackages/checkouts/Zip/Zip/minizip/include','-lz','-lxml2', '-o',str(app / 'Checks')]
+cmd = ['xcrun','--sdk','iphonesimulator','swiftc','-swift-version','6','-parse-as-library','-module-name','NativeTTSBenchmark','-sdk',sdk,'-target',f'{arch}-apple-ios26.0-simulator','-I',str(products),'-F',str(products / 'PackageFrameworks'),'-module-cache-path',str(work / 'modules'),'-Xcc',f'-fmodule-map-file={derived}/Build/Intermediates.noindex/GeneratedModuleMaps-iphonesimulator/Minizip.modulemap','-Xcc',f'-I{derived}/SourcePackages/checkouts/Zip/Zip/minizip/include','-lz','-lxml2', '-o',str(app / 'Checks')]
 cmd += [str(root / 'NativeTTSBenchmark' / (f + '.swift')) for f in files]
 cmd += [str(root / 'Tests/IntegrationChecks.swift')]
 cmd += [str(p) for p in products.glob('*.o')]

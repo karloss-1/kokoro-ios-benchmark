@@ -1,0 +1,195 @@
+import XCTest
+
+@MainActor final class ReaderUITests: XCTestCase {
+    func snapshot(_ name: String) {
+        let item = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        item.name = name; item.lifetime = .keepAlways; add(item)
+    }
+    func chooseFixture(_ app: XCUIApplication, kind: String, stem: String) {
+        app.buttons["addToLibrary"].tap()
+        app.buttons.containing(.staticText, identifier: "Import " + kind).firstMatch.tap()
+        XCTAssertTrue(app.buttons["Browse"].waitForExistence(timeout: 10))
+        app.buttons["Browse"].tap()
+        if app.staticTexts["On My iPhone"].waitForExistence(timeout: 2) { app.staticTexts["On My iPhone"].firstMatch.tap() }
+        if app.staticTexts["Document Reader"].waitForExistence(timeout: 2) { app.staticTexts["Document Reader"].firstMatch.tap() }
+        let folder = app.cells["Validation fixtures, Folder"]
+        if folder.waitForExistence(timeout: 3) { folder.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap() }
+        let file = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", stem)).firstMatch
+        XCTAssertTrue(file.waitForExistence(timeout: 5))
+        file.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap()
+    }
+    func search(_ app: XCUIApplication, for title: String) {
+        let field = app.textFields["librarySearch"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        field.tap()
+        if let value = field.value as? String, value != field.placeholderValue { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count)) }
+        field.typeText(title)
+    }
+    func testPDFImport() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 10))
+        chooseFixture(app, kind: "PDF", stem: "embedded")
+        XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 10))
+        snapshot("PDF options")
+        app.buttons["Page range"].tap()
+        let from = app.textFields["1"]
+        XCTAssertTrue(from.isEnabled)
+        app.buttons.containing(.staticText, identifier: "All pages").firstMatch.tap()
+        XCTAssertFalse(from.isEnabled)
+        XCTAssertTrue(app.buttons["Import"].isEnabled)
+        app.buttons["Page range"].tap()
+        XCTAssertTrue(from.isEnabled)
+        from.tap(); from.typeText(XCUIKeyboardKey.delete.rawValue + "0")
+        XCTAssertFalse(app.buttons["Import"].isEnabled)
+        from.typeText(XCUIKeyboardKey.delete.rawValue + "2")
+        from.tap(); XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Import"].tap()
+        search(app, for: "embedded")
+        XCTAssertTrue(app.staticTexts["embedded"].firstMatch.waitForExistence(timeout: 5))
+        app.staticTexts["embedded"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Embedded page 2")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Embedded page 1")).firstMatch.exists)
+        snapshot("PDF Reader")
+        app.sliders["Document position"].adjust(toNormalizedSliderPosition: 1)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Page 3 of 3")).firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Document navigation"].tap()
+        XCTAssertTrue(app.buttons["Page 2"].waitForExistence(timeout: 3)); app.buttons["Page 2"].tap()
+        app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+    }
+    func testEPUBImport() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        chooseFixture(app, kind: "EPUB", stem: "chapters")
+        XCTAssertTrue(app.buttons["Import"].waitForExistence(timeout: 15))
+        snapshot("EPUB chapters")
+        app.buttons["Two"].tap()
+        app.buttons["Import"].tap()
+        search(app, for: "Fixture EPUB")
+        app.staticTexts["Fixture EPUB"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "FIRST chapter")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "SECOND chapter")).firstMatch.exists)
+        app.buttons["Document navigation"].tap()
+        XCTAssertTrue(app.buttons["Three"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Two"].exists)
+        app.buttons["Three"].tap()
+        snapshot("EPUB selected chapters Reader")
+        app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+    }
+    func testTextReaderAndSettings() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 15))
+        snapshot("Library")
+        app.buttons["addToLibrary"].tap()
+        XCTAssertTrue(app.buttons.containing(.staticText, identifier: "Add text").firstMatch.waitForExistence(timeout: 5))
+        snapshot("Add to Library")
+        app.buttons.containing(.staticText, identifier: "Add text").firstMatch.tap()
+        let title = "UI anatomy \(Int(Date().timeIntervalSince1970))"
+        app.textFields["textTitle"].tap(); app.textFields["textTitle"].typeText(title)
+        app.textViews["textContent"].tap()
+        app.textViews["textContent"].typeText("La fisioterapia estudia el movimiento y la contracción muscular. La articulación glenohumeral permite mover el brazo.\n\nLa apófisis coracoides es una referencia anatómica. El esternocleidomastoideo participa en el movimiento del cuello.")
+        app.buttons["saveText"].tap()
+        XCTAssertTrue(app.textFields["librarySearch"].waitForExistence(timeout: 10))
+        // Prior validation documents may put a new unopened row outside LazyVStack's viewport.
+        app.textFields["librarySearch"].tap(); app.textFields["librarySearch"].typeText(title)
+        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
+        app.staticTexts[title].firstMatch.tap()
+        XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 5))
+        snapshot("Reader")
+        app.buttons["Next sentence"].tap()
+        XCTAssertTrue(app.staticTexts["Sentence 2 of 4"].firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Next paragraph"].tap()
+        XCTAssertTrue(app.staticTexts["Sentence 3 of 4"].firstMatch.waitForExistence(timeout: 3))
+        app.buttons["Previous paragraph"].tap()
+        XCTAssertTrue(app.staticTexts["Sentence 1 of 4"].firstMatch.exists)
+        app.buttons["Next sentence"].tap()
+        app.buttons["readerPlayPause"].tap()
+        XCTAssertEqual(app.buttons["readerPlayPause"].label, "Pause")
+        app.buttons["readerPlayPause"].tap()
+        XCTAssertEqual(app.buttons["readerPlayPause"].label, "Play")
+        app.buttons["Next paragraph"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 10))
+        app.staticTexts[title].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Sentence 3 of 4"].firstMatch.waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Library"].tap()
+        app.textFields["librarySearch"].tap()
+        app.textFields["librarySearch"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: title.count))
+        app.tabBars.buttons["Settings"].tap()
+        XCTAssertTrue(app.staticTexts["Highlight text while reading"].waitForExistence(timeout: 5))
+        snapshot("Settings")
+        app.buttons["Dark"].tap(); snapshot("Settings Dark")
+        app.buttons["System"].tap()
+        app.buttons.containing(.staticText, identifier: "Automatic").firstMatch.tap()
+        XCTAssertTrue(app.segmentedControls.buttons["Spanish"].waitForExistence(timeout: 5))
+        app.segmentedControls.buttons["All"].tap(); snapshot("Voices")
+        app.navigationBars.buttons["Settings"].tap()
+        app.tabBars.buttons["Library"].tap()
+    }
+    func testDocumentActions() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 10))
+        app.buttons["addToLibrary"].tap()
+        app.buttons.containing(.staticText, identifier: "Add text").firstMatch.tap()
+        let title = "Actions \(Int(Date().timeIntervalSince1970))"
+        let renamed = "Renamed " + title
+        app.textFields["textTitle"].tap(); app.textFields["textTitle"].typeText(title)
+        app.textViews["textContent"].tap(); app.textViews["textContent"].typeText("La fisioterapia estudia el movimiento.\n\nEl sistema muscular sostiene el cuerpo.")
+        app.buttons["saveText"].tap()
+        XCTAssertTrue(app.textFields["librarySearch"].waitForExistence(timeout: 5))
+        app.textFields["librarySearch"].tap(); app.textFields["librarySearch"].typeText(title)
+        app.buttons["Actions for \(title)"].tap(); app.buttons["Rename"].tap()
+        let field = app.alerts.textFields.firstMatch
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: title.count + 5))
+        field.typeText(renamed)
+        XCTAssertEqual(field.value as? String, renamed)
+        // XCTest's synthetic typing leaves the software keyboard hidden on this
+        // simulator. The next touch brings it back and moves the alert. Focus the
+        // field and wait for the keyboard before resolving Save's tap location.
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        snapshot("Rename ready")
+        app.alerts.buttons["Save"].tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForNonExistence(timeout: 3))
+        app.textFields["librarySearch"].tap()
+        app.textFields["librarySearch"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: title.count))
+        app.textFields["librarySearch"].typeText(renamed)
+        XCTAssertTrue(app.staticTexts[renamed].firstMatch.waitForExistence(timeout: 3))
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.textFields["librarySearch"].waitForExistence(timeout: 10))
+        app.textFields["librarySearch"].tap(); app.textFields["librarySearch"].typeText(renamed)
+        XCTAssertTrue(app.staticTexts[renamed].firstMatch.waitForExistence(timeout: 5))
+        app.textFields["librarySearch"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: renamed.count))
+        app.textFields["librarySearch"].tap(); app.textFields["librarySearch"].typeText("unmatched title")
+        XCTAssertTrue(app.staticTexts["No matching documents"].waitForExistence(timeout: 3))
+        snapshot("Search empty")
+        app.textFields["librarySearch"].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 15))
+        app.textFields["librarySearch"].typeText(renamed)
+        app.buttons["Actions for \(renamed)"].tap(); app.buttons["Export Text…"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForExistence(timeout: 5))
+        snapshot("Export Text")
+        app.buttons["DOCPicker.actionButton"].tap()
+        XCTAssertTrue(app.buttons["DOCPicker.actionButton"].waitForNonExistence(timeout: 5))
+        app.buttons["Actions for \(renamed)"].tap(); app.buttons["Delete"].tap()
+        app.buttons["Delete"].tap()
+        XCTAssertTrue(app.staticTexts[renamed].firstMatch.waitForNonExistence(timeout: 5))
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 10))
+        app.textFields["librarySearch"].tap(); app.textFields["librarySearch"].typeText(renamed)
+        XCTAssertTrue(app.staticTexts["No matching documents"].waitForExistence(timeout: 5))
+    }
+}

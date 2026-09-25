@@ -71,8 +71,12 @@ import Observation
     func rename(_ document: LibraryDocument, to title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
+        let previous = document.title
         document.title = title
-        do { try context.save() } catch { self.error = error.localizedDescription }
+        do {
+            try context.save()
+            if speech.documentID == document.id { speech.updateTitle(title) }
+        } catch { document.title = previous; self.error = error.localizedDescription }
     }
     func delete(_ document: LibraryDocument) async {
         if speech.documentID == document.id { speech.unload(); opened = nil; content = nil }

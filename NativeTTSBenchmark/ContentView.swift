@@ -27,6 +27,8 @@ struct LibraryView: View {
     @State private var showingReader = false
     @State private var renameTarget: LibraryDocument?
     @State private var renameTitle = ""
+    @State private var renaming = false
+    @State private var deleting = false
     @State private var deleteTarget: LibraryDocument?
     @State private var export: TextExport?
     @State private var exporting = false
@@ -97,10 +99,10 @@ struct LibraryView: View {
                                         }
                                     }.buttonStyle(.plain)
                                     Menu {
-                                        Button("Rename", systemImage: "pencil") { renameTitle = document.title; renameTarget = document }
+                                        Button("Rename", systemImage: "pencil") { renameTitle = document.title; renameTarget = document; renaming = true }
                                         Button("Export Text…", systemImage: "square.and.arrow.up") { exportText(document) }
-                                        Button("Delete", systemImage: "trash", role: .destructive) { deleteTarget = document }
-                                    } label: { Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 28, height: 28) }.accessibilityLabel("Actions for \(document.title)")
+                                        Button("Delete", systemImage: "trash", role: .destructive) { deleteTarget = document; deleting = true }
+                                    } label: { Image(systemName: "ellipsis").foregroundStyle(.secondary).frame(width: 44, height: 44) }.accessibilityLabel("Actions for \(document.title)")
                                 }
                             }
                         }
@@ -115,12 +117,12 @@ struct LibraryView: View {
                     if let document = library.opened, let content = library.content { ReaderView(library: library, document: document, content: content) }
                 }
                 .overlay { if library.isOpening { ProgressView("Opening document…").padding(24).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20)) } }
-                .alert("Rename document", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
+                .alert("Rename document", isPresented: $renaming) {
                     TextField("Title", text: $renameTitle)
                     Button("Save") { if let target = renameTarget { library.rename(target, to: renameTitle) }; renameTarget = nil }
                     Button("Cancel", role: .cancel) { renameTarget = nil }
                 }
-                .confirmationDialog("Delete this document and its saved files?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
+                .confirmationDialog("Delete this document and its saved files?", isPresented: $deleting, titleVisibility: .visible) {
                     Button("Delete", role: .destructive) { if let target = deleteTarget { Task { await library.delete(target) } }; deleteTarget = nil }
                 }
                 .fileExporter(isPresented: $exporting, document: export, contentType: .plainText, defaultFilename: exportName) { result in

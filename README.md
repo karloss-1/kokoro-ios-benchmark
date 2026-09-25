@@ -1,102 +1,102 @@
-# Native TTS Benchmark
+# Document Reader — iOS / iPadOS
 
-Minimal iPhone/iPad benchmark for answering one question: can Apple's native AVSpeechSynthesizer read Spanish academic text clearly, reliably, and with useful playback controls?
+A native, local document library for reading and listening with Apple's system voices. The existing `NativeTTSBenchmark.xcodeproj` name and provisional bundle identifier remain so the project can evolve from the original benchmark without replacing its history.
 
-This is a native SwiftUI app, not the document reader. It has no OCR, camera, PDF/EPUB support, storage, user accounts, external packages, backend, web view, or generated audio files.
+## Requirements and installation
+
+- iPhone or iPad running **iOS/iPadOS 26.0 or later**. Swift 6; current builds use Xcode 27 and its Simulator SDK. No compatibility layer for earlier systems.
+- Open `NativeTTSBenchmark.xcodeproj`. Xcode automatically manages the application scheme; no handcrafted shared scheme is required.
+- Allow Swift Package Manager to resolve the pinned packages (internet is needed for this development step).
+- Select the **NativeTTSBenchmark** target → **Signing & Capabilities** → your Apple development team. No team, keys or provisioning profiles are committed. Change `com.karloss.NativeTTSBenchmark` if your account needs a unique identifier.
+- Connect and unlock the iPhone/iPad, trust the Mac, enable **Settings → Privacy & Security → Developer Mode** when prompted, select the device in Xcode and press Run.
+- Camera access is requested only for Scan pages. PhotosPicker grants access to selected images; the app does not request unrestricted photo-library or microphone access.
+
+## Use
+
+Library is the home screen. The green **+** opens Scan pages, Choose photos, Import PDF, Import EPUB or Add text. PDF imports support all pages or an inclusive page range. EPUB imports expose the real table of contents and allow noncontiguous chapter selection. A missing table of contents is explicitly represented by reading-order sections.
+
+The library supports search, sorting, Continue Listening, rename, deletion and Export Text. Reader presents the processed text, sentence highlighting, optional auto-scroll and navigation by sentence, paragraph or section/page. Tap a sentence to read from it. The slider selects a sentence by its proportional character position; it is not an audio-file timeline. Position survives app relaunch and voice/rate changes. Settings holds voice, speaking rate, highlighting, auto-scroll and System / Light / Dark appearance; Reader also offers text size and speaking rate.
+
+**Export Text** writes the same normalized paragraphs used by Reader/TTS, with page markers for PDF/photos/scans and chapter headings where present. OCR spelling is not silently corrected. Export contains only imported pages/sections. No WAV/MP3 is generated.
 
 ## Architecture
 
-- SpeechEngine.swift owns the AVSpeechSynthesizer, voice selection, playback state, audio session, interruption/route observers, and bounded diagnostics. It is separate from the SwiftUI screen so the engine can be reused if this approach works.
-- SpeechTypes.swift contains the voice filters, rate presets, playback states, and paragraph/sentence segmenter.
-- TestCorpus.swift contains Spanish Short (about 147 words), Spanish Medium (about 488 words), Spanish Long (about 1,341 words), and English Short.
-- ContentView.swift displays device/locale information, all system voices through a language filter, editable text, playback controls, current range highlighting, and diagnostics.
+`Source → ReadingDocument → Reader + SpeechEngine + Export Text`
 
-Text is split at paragraph boundaries and then at sentence boundaries when a paragraph segment would exceed about 700 UTF-16 code units. The app queues one segment at a time rather than submitting the entire long reading as a single utterance. A very long individual sentence remains intact. willSpeakRangeOfSpeechString is used to highlight the corresponding range when iOS reports it; the benchmark does not assume every voice reports useful ranges.
+- `DocumentModel`: normalized sections/pages, paragraphs and sentences, segmented with NaturalLanguage. SwiftData stores library metadata and semantic reading position.
+- `LibraryStorage`: originals, normalized JSON and thumbnails under Application Support, independent of the source file's original location. Files are written atomically; source processing happens before the library entry is added.
+- `ImportCoordinator`: cancellable import lifecycle, actual page/resource progress and cleanup. Extraction and filesystem work run in actors.
+- `DocumentExtractor`: PDFKit uses embedded text per page. Pages without a usable text layer and imported images use **Vision RecognizeDocumentsRequest**, available from iOS 26. ImageIO downsamples and applies EXIF orientation. VisionKit provides the document scanner.
+- `EPUBService`: **Readium Swift Toolkit 3.11.0**, pinned by `Package.resolved`, using Shared/Streamer only. Its Content iterator extracts local EPUB text; no Readium Navigator, TTS or HTTP server is used. Readium still labels this Content API experimental; ambiguous chapter anchors reject partial selection with a visible explanation instead of guessing.
+- `SpeechEngine`: one persistent AVSpeechSynthesizer and one sentence at a time. Utterance identity checks ignore callbacks from speech cancelled by navigation. Completion is stored separately from the playback state.
+- `SystemMedia`: Now Playing metadata and remote play/pause/stop/previous/next sentence. It publishes no fabricated duration or elapsed audio timestamps.
 
-## Apple APIs and deployment target
+The only direct external package is Readium 3.11.0. Its resolved dependencies are recorded in `Package.resolved`; Xcode links only dependencies required by Shared/Streamer. There are no web app, Kokoro, Transformers or ONNX components.
 
-- SwiftUI for the app and interface.
-- AVFoundation: AVSpeechSynthesizer, AVSpeechUtterance, AVSpeechSynthesisVoice, AVAudioSession, and AVSpeechSynthesizerDelegate.
-- Foundation NSString paragraph/sentence enumeration preserves source ranges for segment position and optional highlighting.
-- UIKit UIDevice provides the generic device family and system version; the app does not try to identify a private hardware model.
-- iOS/iPadOS deployment target: 17.0. This is a modern baseline for the SwiftUI interface while keeping the benchmark usable on a broad set of devices. The project targets iPhone and iPad (TARGETED_DEVICE_FAMILY = 1,2).
-- No third-party dependencies. The project uses Swift 5 language mode for broad Xcode compatibility.
+## Speech, progress and background audio
 
-Voice rows use the system-reported name, BCP 47 language, identifier, and quality (Default, Enhanced, or Premium). Spanish voices are ordered with es-MX first; the locale shown is the actual locale returned by iOS. The list includes every voice returned by AVSpeechSynthesisVoice.speechVoices() and can be filtered to Spanish, English, or All.
+Voices are the system's actual `AVSpeechSynthesisVoice` list; Spanish is prioritized, with `es-MX` first. Automatic selection follows the detected document language. Available voices and quality tiers vary by device and installed voice assets.
 
-## Rate presets
+Labels 0.75×–2× map to `AVSpeechUtteranceDefaultSpeechRate × multiplier`, clamped to Apple's public minimum/maximum. At the current default of 0.5, 1× is 0.5 and 1.5× is 0.75. These labels are approximate controls, not measured acoustic speed. Changing rate/voice during speech restarts the current sentence.
 
-Apple's AVSpeechUtterance.rate uses a bounded decimal rate. The app maps each label to AVSpeechUtteranceDefaultSpeechRate × label, clamped to Apple's AVSpeechUtteranceMinimumSpeechRate and AVSpeechUtteranceMaximumSpeechRate.
+Progress is the current sentence's character offset divided by the document's total sentence characters; completion is 100%. It remains meaningful when rate changes. The app does not estimate remaining minutes from unmeasured speech duration.
 
-With Apple's current default constant of 0.5, the labels correspond to:
+AVAudioSession uses **`.playback` / `.spokenAudio` / no mixing options**. The legitimate `audio` background mode permits spoken reading while locked or in another app. Audio interruptions and disconnected output devices pause reading; resume is manual. System policy, force quit and audio interruptions can still stop playback. Physical-device checks are required for lock-screen and Control Center behavior.
 
-| UI label | AVSpeechUtterance.rate |
-| --- | ---: |
-| 0.75× | 0.375 |
-| 1.0× | 0.500 |
-| 1.25× | 0.625 |
-| 1.5× | 0.750 |
-| 2.0× | 1.000 |
+## Privacy, offline use and limits
 
-These are approximate settings, not a promise of an exact acoustic multiplier or words per minute. The selected raw AV rate is shown in diagnostics.
+There is no application backend, CloudKit synchronization, account, subscription, analytics or synthesis API. EPUB's HTTP client explicitly refuses network requests. The app never sends document text to an application server.
 
-## Audio session and background test
+Core extraction and speech use local files and Apple frameworks. Files/Photos may need to download an iCloud item before granting it to the app; make documents and desired system voices available before testing in airplane mode. Apple's voice asset management does not provide an absolute per-voice offline guarantee to this app.
 
-The app configures AVAudioSession when speech starts:
+- DRM/protected EPUBs and locked or copy-restricted PDFs are rejected. Damaged/unsupported inputs show an error.
+- Embedded PDF text order depends on the source PDF. Mixed-layout pages with a usable text layer use that layer; OCR is selected per page, not per illustration. Multi-column layouts, handwriting, tables and OCR language accuracy need review on representative documents.
+- Cancellation is checked between stages/pages and after Vision returns; the current system operation may finish first. No partial document is added after cancellation.
+- Large documents retain normalized text in memory, while image rendering/OCR is sequential. Real-device memory/performance testing remains necessary.
+- Imported metadata/positions are local. Deleting the app deletes its library. There is no document synchronization or Share Extension in this version.
 
-- Category: playback because spoken reading is the primary output.
-- Mode: spokenAudio, Apple's mode for continuous spoken content such as podcasts and audiobooks.
-- Options: none. Other audio is not mixed in by this benchmark.
+## Validation
 
-The session is deactivated when reading ends or is cancelled, with notifyOthersOnDeactivation.
+See **IMPLEMENTATION_STATUS.md** for the current build, passing checks, known failures and device-only work. Simulator results do not establish iPhone/iPad audio or memory behavior.
 
-The app includes the audio value in UIBackgroundModes. Apple documents that playback plus the audio background mode allows playback to continue when the app backgrounds or the screen locks. This is appropriate for an app whose central purpose is reading aloud, and allows a real lock-screen/app-switch test. It does not keep the app alive by itself or bypass system interruptions. The app observes audio interruptions and route changes, records them, and leaves resuming after an interruption to the user.
+Build without signing:
 
-## Privacy and voice availability
+```sh
+xcodebuild -project NativeTTSBenchmark.xcodeproj -scheme NativeTTSBenchmark \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/NativeReaderBuild \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
-The app contains no networking code and sends no text to an app server. It does not record audio or request microphone permission. iOS supplies the voices and may manage voice assets as part of the operating system. The app cannot prove that a particular voice works offline; quality describes Apple's voice tier, not a connectivity guarantee.
+With a booted simulator, the core integration harness compiles the real production services and exercises generated PDF/EPUB/image fixtures, persistence and navigation:
 
-## Open, sign, and install from Xcode
+```sh
+python3 Tests/run-integration.py /tmp/NativeReaderBuild SIMULATOR_UDID
+```
 
-1. Install a current stable Xcode on a Mac.
-2. Open NativeTTSBenchmark.xcodeproj from this repository.
-3. In Xcode, open Xcode > Settings > Accounts and add your Apple Account if it is not already present.
-4. Select the NativeTTSBenchmark project, then the NativeTTSBenchmark target. In Signing & Capabilities, enable Automatically manage signing and choose your Personal Team or development team. No certificate or provisioning profile is included in this repository.
-5. If Xcode reports that the provisional bundle identifier is already in use, replace com.karloss.NativeTTSBenchmark with a unique identifier in the target's Signing & Capabilities settings.
-6. Connect and unlock the iPhone/iPad, accept its Trust prompt if shown, then choose it from Xcode's run-destination menu. On a device that requires Developer Mode, enable it under Settings > Privacy & Security > Developer Mode and follow the restart confirmation.
-7. Press Run. No camera, photo library, microphone, or network permission is needed. Xcode installs this development build directly on the selected device; this is not App Store or TestFlight distribution.
+UI checks use XCTest in a temporary copy of the project, leaving the application's schemes and targets unchanged:
 
-## Benchmark procedure
+```sh
+python3 Tests/run-ui.py SIMULATOR_UDID
+```
 
-1. Start with a local Spanish voice, preferably one whose system locale is es-MX; if none is available, use another Spanish locale and record it exactly.
-2. Listen to Spanish Short at 1.0× and assess the anatomical terms as well as naturalness and audible defects.
-3. Test Pause, wait five seconds, Resume, then Stop and start again.
-4. Try each rate preset and compare the perceived speed.
-5. Listen to Medium and Long. Note whether speech finishes, stalls, omits content, or the app stops responding.
-6. During Long, lock the screen, switch to another app, return, and note what happened. If possible, also observe an actual audio interruption and whether the app records it.
-7. Change the voice and repeat Short. Use English Short with an English voice for comparison.
+The optional third argument to the core runner seeds a **simulator-only** app data container for inspection. Never pass a real-device or personal library path. Tests retain fixture artifacts and XCTest results in temporary directories for diagnosis.
 
-## What to report
+## First physical-device pass
 
-Record the iPhone/iPad model family shown by the app, iOS/iPadOS version, system locale, voice name/language/identifier/quality, selected rate label and raw AV rate, whether each text was audible and completed, any pronunciation or sound defects, Pause/Resume/Stop behavior, current range highlighting, interruption events, and what happened during lock screen and app switching. Include any Xcode console errors. Voice lists can differ by device, region, language settings, and installed system voice assets.
+1. Select an installed Spanish voice in Settings and set 1×. Add a short academic text; verify audible pronunciation, Play/Pause, sentence/paragraph jumps and slider seeking.
+2. Leave at a known sentence, relaunch, and confirm the position. Test another voice/rate and Dark/System appearance.
+3. Import a digital PDF, a scanned PDF and a mixed PDF. Try a page range; compare the displayed/exported text with the original pages.
+4. Select multiple photos in a known order; scan two pages; inspect OCR and page markers. Cancel a longer import and confirm no partial library entry remains.
+5. Import an EPUB with selected noncontiguous chapters and one without a TOC. Check chapter boundaries and export.
+6. During longer speech, lock/unlock, switch apps, use Control Center play/pause and previous/next, disconnect headphones and test an interruption. Record behavior without assuming background success.
+7. Repeat local-document reading/OCR/speech in airplane mode and test representative large books.
 
-## Known limits
+Report device/OS, voice name/locale/quality, document type and size/page count, exact failing action, whether relaunch restores position, screenshots of extraction/UI issues and relevant Xcode logs.
 
-- This benchmark has not been validated on the target iPhone/iPad until it is installed and tested there.
-- System voices and their quality differ between devices. Enhanced and Premium voices require system voice assets; the app does not download model files.
-- The willSpeakRangeOfSpeechString callback is used when provided, but the app can continue without word-range highlights.
-- Sentence segmentation uses Foundation's sentence enumeration. Abbreviations and language-specific punctuation may still produce imperfect boundaries.
-- Rate is a control value, not a measured speaking-speed multiplier.
-- Background Audio allows the intended playback mode, but system interruptions, route changes, force quit, and OS policy still affect playback.
+## Sources
 
-## Apple documentation consulted
-
+- [Vision document recognition (WWDC25)](https://developer.apple.com/videos/play/wwdc2025/272/)
+- [RecognizeDocumentsRequest](https://developer.apple.com/documentation/vision/recognizedocumentsrequest)
 - [AVSpeechSynthesizer](https://developer.apple.com/documentation/avfaudio/avspeechsynthesizer)
-- [AVSpeechSynthesizerDelegate](https://developer.apple.com/documentation/avfaudio/avspeechsynthesizerdelegate)
-- [AVSpeechSynthesisVoice](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoice)
-- [AVSpeechSynthesisVoiceQuality](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoicequality)
-- [AVSpeechUtterance.rate and rate constants](https://developer.apple.com/documentation/avfaudio/avspeechutterance/rate)
-- [AVAudioSession spokenAudio mode](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/spokenaudio)
-- [AVAudioSession playback category](https://developer.apple.com/documentation/avfaudio/avaudiosession/category-swift.struct/playback)
-- [Handling audio interruptions](https://developer.apple.com/documentation/avfaudio/handling-audio-interruptions)
-- [Xcode 26.6 release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_6-release-notes)
+- [Spoken audio mode](https://developer.apple.com/documentation/avfaudio/avaudiosession/mode-swift.struct/spokenaudio)
+- [Readium Swift Toolkit 3.11.0](https://github.com/readium/swift-toolkit/releases/tag/3.11.0)

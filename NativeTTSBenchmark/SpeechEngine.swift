@@ -25,6 +25,7 @@ import Observation
     private var wantsPlayback = false
     private var interrupted = false
     private var totalCharacters = 0
+    private var completed = false
 
     override init() {
         super.init()
@@ -54,7 +55,7 @@ import Observation
     var currentUnit: ReadingUnit? { units.indices.contains(index) ? units[index] : nil }
     var isPlaying: Bool { state == .speaking }
     var progress: Double {
-        if state == .finished { return 1 }
+        if completed { return 1 }
         guard totalCharacters > 0, let currentUnit else { return 0 }
         return Double(currentUnit.characterOffset) / Double(totalCharacters)
     }
@@ -75,7 +76,7 @@ import Observation
         let changed = selectedVoiceID != voiceID || self.rate != rate
         selectedVoiceID = voiceID
         self.rate = min(2, max(0.75, rate))
-        if changed, !units.isEmpty { seek(to: index, resume: isPlaying) }
+        if changed, !units.isEmpty, !completed { seek(to: index, resume: isPlaying) }
     }
     func load(id: UUID, title: String, content: ReadingDocument, position: Int, completed: Bool) {
         stop()
@@ -85,17 +86,19 @@ import Observation
         units = content.units
         totalCharacters = units.reduce(0) { $0 + $1.text.count }
         index = min(max(0, position), max(0, units.count - 1))
+        self.completed = completed
         state = completed ? .finished : .ready
         error = nil
     }
-    func unload() { stop(); documentID = nil; content = nil; units = []; playbackChanged?() }
+    func unload() { stop(); documentID = nil; content = nil; units = []; completed = false; totalCharacters = 0; playbackChanged?() }
+    func updateTitle(_ title: String) { self.title = title; playbackChanged?() }
     func play() {
         guard !units.isEmpty, !interrupted else { return }
         error = nil
         do {
             try activateAudioSession()
             wantsPlayback = true
-            if state == .finished { index = 0 }
+            if completed { index = 0; completed = false }
             if synthesizer.isPaused, activeUtterance != nil, synthesizer.continueSpeaking() {
                 state = .speaking
                 playbackChanged?()
@@ -124,6 +127,7 @@ import Observation
         let shouldPlay = resume ?? isPlaying
         wantsPlayback = false
         invalidateUtterance()
+        completed = false
         index = min(max(destination, 0), units.count - 1)
         state = .paused
         notify("Position changed")
@@ -147,7 +151,7 @@ import Observation
     }
     private func speakCurrent() {
         guard let unit = currentUnit else { return }
-        refreshVoices()
+        if voices.isEmpty { refreshVoices() }
         let language = content?.language ?? "es"
         let voice = AVSpeechSynthesisVoice(identifier: selectedVoiceID)
             ?? voices.first { $0.language.hasPrefix(language) }
@@ -208,9 +212,9 @@ import Observation
             if index + 1 < units.count {
                 index += 1
                 if wantsPlayback { speakCurrent() } else { state = .paused; notify("Paused at next sentence") }
-            } else { state = .finished; wantsPlayback = false; deactivateAudioSession(); notify("Reading complete") }
+            } else { completed = true; state = .finished; wantsPlayback = false; deactivateAudioSession(); notify("Reading complete") }
         case "didCancel": self.activeUtterance = nil; fail("Speech was cancelled by the system. Tap Play to resume this sentence.")
-        case "didPause": state = .paused; notify(event)
+        case "didPause": if !wantsPlayback { state = .paused; notify(event) }
         case "didContinue", "didStart": if wantsPlayback { state = .speaking }; notify(event)
         default: break
         }
