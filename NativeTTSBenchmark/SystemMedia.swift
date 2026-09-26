@@ -45,7 +45,14 @@ import UIKit
             Task { [weak self] in
                 let data = await LibraryStorage.shared.thumbnail(id)
                 guard let self, self.publishedID == id else { return }
-                if let data, let image = UIImage(data: data) { self.artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image } }
+                if let data,
+                   let image = UIImage(data: data),
+                   let cgImage = image.cgImage {
+                    self.artwork = MPMediaItemArtwork(
+                        boundsSize: image.size,
+                        requestHandler: Self.artworkRequestHandler(for: cgImage)
+                    )
+                }
                 self.updateMetadata()
             }
         }
@@ -73,5 +80,11 @@ import UIKit
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         // No duration or elapsed-time keys: AVSpeechSynthesizer has no audio timeline.
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// MediaPlayer can request artwork away from the main queue. Build its callback
+    /// outside MainActor isolation so its execution doesn't inherit a main-queue check.
+    nonisolated private static func artworkRequestHandler(for image: CGImage) -> (CGSize) -> UIImage {
+        { _ in UIImage(cgImage: image) }
     }
 }

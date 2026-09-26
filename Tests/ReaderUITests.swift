@@ -16,7 +16,8 @@ import XCTest
             app.buttons["Browse"].tap()
         }
         if localFiles.waitForExistence(timeout: 2) { localFiles.tap() }
-        if app.staticTexts["Document Reader"].waitForExistence(timeout: 2) { app.staticTexts["Document Reader"].firstMatch.tap() }
+        let appFolder = app.staticTexts.matching(NSPredicate(format: "label IN %@", ["Document Reader", "Mr. Reader"])).firstMatch
+        if appFolder.waitForExistence(timeout: 2) { appFolder.tap() }
         let folder = app.cells["Validation fixtures, Folder"]
         if folder.waitForExistence(timeout: 3) { folder.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)).tap() }
         let file = app.cells.matching(NSPredicate(format: "label BEGINSWITH %@", stem)).firstMatch
@@ -30,6 +31,14 @@ import XCTest
         field.tap()
         if let value = field.value as? String, value != field.placeholderValue { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: value.count)) }
         field.typeText(title)
+    }
+    func assertPlaybackStartsAndPauses(_ app: XCUIApplication) {
+        let playback = app.buttons["readerPlayPause"]
+        XCTAssertTrue(playback.waitForExistence(timeout: 10))
+        playback.tap()
+        XCTAssertEqual(playback.label, "Pause")
+        playback.tap()
+        XCTAssertEqual(playback.label, "Play")
     }
     func testPDFImport() throws {
         continueAfterFailure = false
@@ -58,6 +67,7 @@ import XCTest
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Embedded page 2")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Embedded page 1")).firstMatch.exists)
         snapshot("PDF Reader")
+        assertPlaybackStartsAndPauses(app)
         app.sliders["Document position"].adjust(toNormalizedSliderPosition: 1)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Page 3 of 3")).firstMatch.waitForExistence(timeout: 3))
         app.buttons["Document navigation"].tap()
@@ -207,6 +217,7 @@ import XCTest
         XCTAssertTrue(title.waitForExistence(timeout: 10)); title.tap()
         XCTAssertTrue(app.buttons["readerPlayPause"].waitForExistence(timeout: 10))
         snapshot("Photos Reader")
+        assertPlaybackStartsAndPauses(app)
         app.buttons["Document navigation"].tap()
         XCTAssertTrue(app.buttons["Page 2"].waitForExistence(timeout: 5)); app.buttons["Page 2"].tap()
         app.buttons["Document actions"].tap(); app.buttons["Export Text…"].tap()
@@ -284,6 +295,22 @@ import XCTest
         app.segmentedControls.buttons["All"].tap(); snapshot("Voices")
         app.navigationBars.buttons["Settings"].tap()
         app.buttons["Library"].firstMatch.tap()
+    }
+    func testAddTextPlaybackSmoke() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.karloss.NativeTTSBenchmark")
+        app.launch()
+        XCTAssertTrue(app.buttons["addToLibrary"].waitForExistence(timeout: 10))
+        app.buttons["addToLibrary"].tap()
+        app.buttons.containing(.staticText, identifier: "Add text").firstMatch.tap()
+        let title = "TTS smoke \(Int(Date().timeIntervalSince1970))"
+        app.textFields["textTitle"].tap(); app.textFields["textTitle"].typeText(title)
+        app.textViews["textContent"].tap(); app.textViews["textContent"].typeText("La fisioterapia estudia el movimiento y la contracción muscular.")
+        app.buttons["saveText"].tap()
+        search(app, for: title)
+        XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 5))
+        app.staticTexts[title].firstMatch.tap()
+        assertPlaybackStartsAndPauses(app)
     }
     func testDocumentActions() throws {
         continueAfterFailure = false
